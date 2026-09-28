@@ -447,6 +447,10 @@
         </select>
       </div>
       <div class="form-group">
+        <label>Alert Server URL (your Render backend)</label>
+        <input type="text" id="set-alert-server" placeholder="https://your-app.onrender.com">
+      </div>
+      <div class="form-group">
         <label><input type="checkbox" id="set-sound" checked> Enable alert sounds</label>
       </div>
       <div class="form-group">
@@ -616,7 +620,8 @@ const AppState = {
     finnhubKey: '',
     stockDataSource: 'yahoo_proxy',
     soundEnabled: true,
-    demoMode: false
+    demoMode: false,
+    alertServerUrl: '' // e.g. https://tradeview-pro.onrender.com
   },
   ws: null,
   tickerWs: null,
@@ -801,7 +806,11 @@ const API = {
     const m = this.yahooMap[timeframe] || { range: '1mo', interval: '60m' };
     const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
     let url;
-    if (AppState.settings.stockDataSource === 'server_proxy') {
+    const serverUrl = AppState.settings.alertServerUrl;
+    if (serverUrl) {
+      // Use Render backend as Yahoo proxy (fastest, no CORS issues)
+      url = `${serverUrl}/api/yahoo/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
+    } else if (AppState.settings.stockDataSource === 'server_proxy') {
       url = `/api/yahoo/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
     } else {
       url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
@@ -829,7 +838,10 @@ const API = {
   async searchYahoo(query) {
     try {
       let url;
-      if (AppState.settings.stockDataSource === 'server_proxy') {
+      const serverUrl = AppState.settings.alertServerUrl;
+      if (serverUrl) {
+        url = `${serverUrl}/api/yahoo/search?q=${encodeURIComponent(query)}`;
+      } else if (AppState.settings.stockDataSource === 'server_proxy') {
         url = `/api/yahoo/search?q=${encodeURIComponent(query)}`;
       } else {
         const yUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=8&newsCount=0`;
@@ -2023,10 +2035,49 @@ const Watchlist = {
     const stocks = AppState.watchlist.filter(w => w.market === 'stocks' || w.market === 'nse' || w.market === 'bse');
     if (!stocks.length) return;
 
-    const poll = async () => {
+    const pollBulk = async () => {
+      // Use backend bulk endpoint — fetches ALL stocks in one request
+      const serverUrl = AppState.settings.alertServerUrl;
+      if (!serverUrl) return pollIndividual(); // fallback if no server configured
+
+      try {
+        const symbols = stocks.map(s => ({ symbol: s.symbol, market: s.market }));
+        const resp = await fetch(`${serverUrl}/api/prices/bulk`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbols })
+        });
+        if (!resp.ok) throw new Error('Bulk price fetch failed');
+        const data = await resp.json();
+        const prices = data.prices || {};
+
+        // Update ALL watchlist items at once
+        for (const s of stocks) {
+          const p = prices[s.symbol];
+          if (p && p.price != null) {
+            UIController.updateWatchlistItem(s.symbol, p.price, p.change || 0);
+            // Also check price alerts for this symbol
+            AppState.alerts.forEach(alert => {
+              if (!alert.enabled || alert.symbol !== s.symbol) return;
+              if (alert.type === 'price_above' && p.price > alert.value) {
+                AlertManager.triggerAlert(alert, p.price);
+              } else if (alert.type === 'price_below' && p.price < alert.value) {
+                AlertManager.triggerAlert(alert, p.price);
+              }
+            });
+          }
+        }
+        console.log(`✅ Bulk price update: ${Object.keys(prices).length}/${stocks.length} stocks`);
+      } catch (e) {
+        console.warn('Bulk price fetch error, falling back to individual:', e.message);
+        await pollIndividual();
+      }
+    };
+
+    const pollIndividual = async () => {
+      // Fallback: fetch one stock at a time via AllOrigins/Finnhub
       for (const s of stocks) {
         try {
-          // Try Finnhub first for US stocks
           if (s.market === 'stocks' && AppState.settings.finnhubKey) {
             const q = await API.fetchFinnhubQuote(s.symbol);
             if (q && q.c) {
@@ -2034,10 +2085,12 @@ const Watchlist = {
               continue;
             }
           }
-          // For NSE/BSE and fallback: use Yahoo Finance quote
+          const serverUrl = AppState.settings.alertServerUrl;
           const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}?range=1d&interval=1m`;
           let url;
-          if (AppState.settings.stockDataSource === 'server_proxy') {
+          if (serverUrl) {
+            url = `${serverUrl}/api/yahoo/chart/${s.symbol}?range=1d&interval=1m`;
+          } else if (AppState.settings.stockDataSource === 'server_proxy') {
             url = `/api/yahoo/chart/${s.symbol}?range=1d&interval=1m`;
           } else {
             url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
@@ -2054,9 +2107,10 @@ const Watchlist = {
         } catch(e) { /* skip on error, retry next cycle */ }
       }
     };
-    poll();
+
+    pollBulk();
     // Refresh every 60 seconds for stock/NSE/BSE watchlist prices
-    AppState.stockPollInterval = setInterval(poll, 60000);
+    AppState.stockPollInterval = setInterval(pollBulk, 60000);
   }
 };
 
@@ -2377,6 +2431,7 @@ const UIController = {
       document.getElementById('set-stock-source').value = AppState.settings.stockDataSource;
       document.getElementById('set-sound').checked = AppState.settings.soundEnabled;
       document.getElementById('set-demo').checked = AppState.settings.demoMode;
+      document.getElementById('set-alert-server').value = AppState.settings.alertServerUrl || '';
       document.getElementById('settings-modal').classList.remove('hidden');
     });
     document.getElementById('btn-settings-cancel').addEventListener('click', () => {
@@ -2387,9 +2442,10 @@ const UIController = {
       AppState.settings.stockDataSource = document.getElementById('set-stock-source').value;
       AppState.settings.soundEnabled = document.getElementById('set-sound').checked;
       AppState.settings.demoMode = document.getElementById('set-demo').checked;
+      AppState.settings.alertServerUrl = document.getElementById('set-alert-server').value.trim().replace(/\/+$/, '');
       Storage.save();
       document.getElementById('settings-modal').classList.add('hidden');
-      // Restart stock polling if key changed
+      // Restart polling with new settings
       Watchlist.restart();
     });
 

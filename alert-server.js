@@ -229,6 +229,50 @@ app.get('/api/alerts', (req, res) => {
   res.json({ alerts, alertHistory: alertHistory.slice(0, 100) });
 });
 
+// ==================== BULK PRICE ENDPOINT ====================
+// Frontend calls this every 60s to get ALL watchlist prices at once
+app.post('/api/prices/bulk', async (req, res) => {
+  const { symbols } = req.body; // [{symbol, market}]
+  if (!Array.isArray(symbols)) return res.status(400).json({ error: 'symbols array required' });
+
+  const results = {};
+  const batchSize = 5; // fetch 5 at a time to avoid rate limits
+
+  for (let i = 0; i < symbols.length; i += batchSize) {
+    const batch = symbols.slice(i, i + batchSize);
+    const promises = batch.map(async (s) => {
+      try {
+        const price = await fetchPrice(s.symbol, s.market);
+        if (price !== null) {
+          // Get previous close for change calculation
+          const prev = lastPrices[s.symbol];
+          const change = prev ? ((price - prev.price) / prev.price * 100) : 0;
+          results[s.symbol] = { price, change, time: Date.now() };
+          lastPrices[s.symbol] = { price, time: Date.now() };
+        }
+      } catch (e) { /* skip */ }
+    });
+    await Promise.all(promises);
+    // Small delay between batches
+    if (i + batchSize < symbols.length) await new Promise(r => setTimeout(r, 300));
+  }
+
+  res.json({ prices: results, timestamp: Date.now() });
+});
+
+// Get single stock price
+app.get('/api/price/:symbol', async (req, res) => {
+  const { symbol } = req.params;
+  const market = req.query.market || (symbol.includes('.NS') ? 'nse' : symbol.includes('.BO') ? 'bse' : symbol.endsWith('USDT') ? 'crypto' : 'stocks');
+  const price = await fetchPrice(symbol, market);
+  if (price !== null) {
+    lastPrices[symbol] = { price, time: Date.now() };
+    res.json({ symbol, price, time: Date.now() });
+  } else {
+    res.status(404).json({ error: 'Could not fetch price' });
+  }
+});
+
 // Create alert
 app.post('/api/alerts', (req, res) => {
   const { symbol, market, type, value, description } = req.body;
