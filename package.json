@@ -1,11 +1,12 @@
 {
   "name": "tradeview-pro",
-  "version": "1.0.0",
-  "description": "TradingView-like free trading terminal with real-time charts and alerts",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "TradingView-like free trading terminal with 24/7 Telegram alerts",
+  "main": "alert-server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node alert-server.js",
+    "server": "node server.js",
+    "dev": "node alert-server.js"
   },
   "dependencies": {
     "express": "^4.18.2"
