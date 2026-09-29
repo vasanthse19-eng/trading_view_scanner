@@ -117,8 +117,13 @@ you will need to add a Netlify Function -- the static deploy does not run
 2. Create a new **Web Service** on [render.com](https://render.com)
 3. Set:
    - **Build command:** `npm install`
-   - **Start command:** `node server.js`
-4. Render reads the `Procfile` automatically if you prefer that route
+   - **Start command:** `node alert-server.js`
+4. Add environment variables:
+   - `TELEGRAM_BOT_TOKEN` — from @BotFather
+   - `TELEGRAM_CHAT_ID` — your Telegram chat ID
+   - `RENDER_EXTERNAL_URL` — your Render app URL (for dashboard links in Telegram)
+5. The scanner runs automatically daily at 7:00 PM IST
+6. Use [UptimeRobot](https://uptimerobot.com) to ping `/api/health` every 5 min to prevent sleep
 
 ---
 
@@ -164,6 +169,62 @@ cleared.
 | `Delete` | Remove selected drawing |
 | `+` / `-` | Zoom in / out on the chart |
 | Scroll | Pan the chart horizontally |
+
+---
+
+## 📊 Chart Pattern Scanner (NEW)
+
+Automated daily scanner that analyzes **~1800 NSE stocks** for chart patterns on both daily and weekly timeframes.
+
+### Detected Patterns
+
+| Pattern | Type | Signal |
+|---------|------|--------|
+| Ascending Triangle | 📐⬆️ | Bullish breakout |
+| Descending Triangle | 📐⬇️ | Bearish breakout |
+| Symmetrical Triangle | 📐↔️ | Breakout either direction |
+| Bull Flag (Pole & Flag) | 🚩⬆️ | Bullish continuation |
+| Bear Flag (Pole & Flag) | 🚩⬇️ | Bearish continuation |
+| Head & Shoulders | 👤⬇️ | Bearish reversal |
+| Inverse Head & Shoulders | 👤⬆️ | Bullish reversal |
+
+### How It Works
+
+1. Fetches 6-month daily + 1-year weekly OHLCV data from Yahoo Finance
+2. Runs swing detection, trendline fitting, and pattern recognition algorithms
+3. Generates a dark-themed HTML dashboard with filters, sparklines, and details
+4. Sends a Telegram summary with top matches and a link to the dashboard
+5. Runs automatically daily at **7:00 PM IST**
+
+### Scanner API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/scanner/run` | Trigger a manual scan |
+| `GET` | `/api/scanner/status` | Check scan progress |
+| `GET` | `/api/scanner/results` | Get results (supports filters) |
+| `GET` | `/api/scanner/dashboard` | View HTML dashboard |
+| `GET` | `/api/scanner/symbols` | List all NSE symbols |
+
+**Query filters** for `/api/scanner/results`:
+- `?pattern=triangle` — filter by pattern type
+- `?direction=bullish` — bullish or bearish
+- `?timeframe=daily` — daily or weekly
+- `?minConfidence=70` — minimum confidence %
+- `?search=reliance` — search by name/symbol
+- `?limit=20` — limit results
+
+### Scanner Files
+
+```
+scanner/
+├── nse-symbols.js    # ~1800 NSE stock symbols
+├── data-fetcher.js   # Yahoo Finance batch fetcher
+├── patterns.js       # Pattern detection algorithms
+├── dashboard.js      # HTML dashboard generator
+├── index.js          # Scanner orchestrator
+└── routes.js         # Express API routes
+```
 
 ---
 

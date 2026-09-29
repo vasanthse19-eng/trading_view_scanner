@@ -406,6 +406,15 @@ app.get('/api/yahoo/search', async (req, res) => {
   }
 });
 
+// ==================== SCANNER ====================
+const scannerRoutes = require('./scanner/routes');
+const scanner = require('./scanner/index');
+app.use('/api/scanner', scannerRoutes);
+
+// Make sendTelegram available to scanner routes
+app.locals.sendTelegram = sendTelegram;
+app.locals.dashboardUrl = process.env.RENDER_EXTERNAL_URL || process.env.DASHBOARD_URL || '';
+
 // ==================== STATIC FILES ====================
 app.use(express.static(path.join(__dirname)));
 
@@ -442,4 +451,40 @@ app.listen(PORT, async () => {
       console.error('Alert check error:', e.message);
     }
   }, CHECK_INTERVAL);
+
+  // ── Daily Pattern Scanner Cron — 7:00 PM IST (13:30 UTC) ──
+  function scheduleDailyScan() {
+    const now = new Date();
+    // 7:00 PM IST = 13:30 UTC
+    const targetHour = 13;
+    const targetMin = 30;
+
+    let next = new Date(now);
+    next.setUTCHours(targetHour, targetMin, 0, 0);
+
+    // If already past today's target, schedule for tomorrow
+    if (next <= now) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+
+    const msUntil = next - now;
+    const hoursUntil = (msUntil / 3600000).toFixed(1);
+    console.log(`📅 Next pattern scan scheduled at 7:00 PM IST (in ${hoursUntil}h)`);
+
+    setTimeout(async () => {
+      console.log('⏰ Scheduled daily pattern scan triggered!');
+      try {
+        await scanner.runScan({
+          sendTelegram,
+          dashboardUrl: app.locals.dashboardUrl,
+          batchSize: 5
+        });
+      } catch (e) {
+        console.error('❌ Scheduled scan error:', e.message);
+      }
+      // Schedule next day's scan
+      scheduleDailyScan();
+    }, msUntil);
+  }
+  scheduleDailyScan();
 });
