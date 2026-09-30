@@ -166,16 +166,44 @@ body {
   line-height: 1.5;
 }
 a { color: #2962ff; text-decoration: none; }
+.hidden { display: none; }
+
+/* ===== NAV BAR ===== */
+.nav-bar { background:#0d1117; border-bottom:1px solid #2a2e3e; padding:10px 24px; display:flex; align-items:center; gap:24px; position:sticky; top:0; z-index:100; }
+.nav-logo { font-weight:700; font-size:16px; color:#2962ff; text-decoration:none; }
+.nav-logo span { color:#d1d4dc; }
+.nav-links { display:flex; gap:4px; }
+.nav-link { background:transparent; border:1px solid transparent; color:#787b86; padding:6px 14px; border-radius:4px; font-size:0.85rem; cursor:pointer; text-decoration:none; transition:all 0.15s; font-family:inherit; }
+.nav-link:hover { color:#d1d4dc; background:#1e2235; }
+.nav-link.active { color:#fff; background:#2962ff; border-color:#2962ff; }
+.nav-actions { margin-left:auto; display:flex; gap:8px; }
+.scan-btn { background:#2962ff; color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:0.85rem; cursor:pointer; font-weight:600; transition:background 0.15s; font-family:inherit; }
+.scan-btn:hover { background:#1e53e5; }
+.scan-btn.secondary { background:transparent; border:1px solid #2a2e3e; color:#d1d4dc; font-weight:400; }
+.scan-btn.secondary:hover { background:#1e2235; }
+.scan-btn:disabled { opacity:0.5; cursor:not-allowed; }
+
+/* ===== SCAN PROGRESS ===== */
+.scan-progress { background:#131722; border-bottom:1px solid #2a2e3e; padding:10px 24px; }
+.scan-progress.hidden { display:none; }
+.scan-progress-bar { height:6px; background:#2a2e3e; border-radius:3px; overflow:hidden; margin-bottom:6px; }
+.scan-progress-fill { height:100%; background:#2962ff; border-radius:3px; transition:width 0.3s; width:0%; }
+.scan-progress-text { font-size:0.8rem; color:#787b86; }
+
+/* ===== STOCK LIST VIEW ===== */
+.stock-list-view.hidden { display:none; }
+.symbol-link { color:#2962ff; text-decoration:none; font-weight:600; }
+.symbol-link:hover { text-decoration:underline; }
 
 /* ===== HEADER ===== */
 .header {
   background: #131722;
   border-bottom: 1px solid #2a2e3e;
-  padding: 16px 24px;
+  padding: 12px 24px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
 }
 .header-title {
@@ -475,9 +503,28 @@ td.sparkline-cell svg { display: block; }
 </head>
 <body>
 
+<!-- NAV BAR -->
+<div class="nav-bar">
+  <a href="/" class="nav-logo">TradeView <span>Pro</span></a>
+  <div class="nav-links">
+    <a href="/" class="nav-link">Charts</a>
+    <a href="/api/scanner/dashboard" class="nav-link active" id="navScannerLink">Scanner</a>
+    <button type="button" class="nav-link" id="stockListToggleBtn">Stock List</button>
+  </div>
+  <div class="nav-actions">
+    <button type="button" class="scan-btn secondary" id="refreshBtn">Refresh</button>
+    <button type="button" class="scan-btn" id="runScanBtn">Run Scan</button>
+  </div>
+</div>
+
+<!-- SCAN PROGRESS -->
+<div class="scan-progress hidden" id="scanProgress">
+  <div class="scan-progress-bar"><div class="scan-progress-fill" id="scanProgressFill"></div></div>
+  <div class="scan-progress-text" id="scanProgressText">Starting scan...</div>
+</div>
+
 <!-- HEADER -->
 <div class="header">
-  <div class="header-title"><span class="emoji">📊</span>TradeView Pro &mdash; Pattern Scanner Dashboard</div>
   <div class="header-meta">
     Last scan: <strong>${scanTimeFormatted}</strong>
     <span class="sep">|</span>
@@ -491,6 +538,7 @@ td.sparkline-cell svg { display: block; }
 </div>
 
 <div class="container">
+  <div id="scannerView">
 
   <!-- FILTER BAR -->
   <div class="filter-bar">
@@ -514,6 +562,13 @@ td.sparkline-cell svg { display: block; }
       <button class="filter-btn active" data-filter="timeframe" data-value="all">All</button>
       <button class="filter-btn" data-filter="timeframe" data-value="daily">Daily</button>
       <button class="filter-btn" data-filter="timeframe" data-value="weekly">Weekly</button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group">
+      <span class="filter-group-label">Sector:</span>
+      <select class="sort-select" id="sectorSelect">
+        <option value="all">All Sectors</option>
+      </select>
     </div>
     <div class="filter-sep"></div>
     <div class="filter-group">
@@ -593,6 +648,52 @@ td.sparkline-cell svg { display: block; }
     </div>
   </div>
 
+  </div>
+
+  <!-- STOCK LIST VIEW -->
+  <div id="stockListView" class="stock-list-view hidden">
+
+    <!-- STOCK LIST FILTER BAR -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <input type="text" class="search-input" id="stockListSearch" placeholder="Search stock / symbol...">
+      </div>
+      <div class="filter-sep"></div>
+      <div class="filter-group">
+        <span class="filter-group-label">Sector:</span>
+        <select class="sort-select" id="stockListSectorSelect">
+          <option value="all">All Sectors</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- STOCK LIST RESULTS INFO -->
+    <div class="results-info">
+      Showing <strong id="stockListCount">0</strong> stocks
+    </div>
+
+    <!-- STOCK LIST TABLE -->
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Name</th>
+            <th>Sector</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="stockListBody">
+        </tbody>
+      </table>
+      <div class="no-results" id="stockListNoResults" style="display:none;">
+        <div class="nr-icon">🔍</div>
+        <div class="nr-text">No stocks found</div>
+      </div>
+    </div>
+
+  </div>
+
 </div>
 
 <!-- FOOTER -->
@@ -612,6 +713,7 @@ td.sparkline-cell svg { display: block; }
     category: 'all',
     direction: 'all',
     timeframe: 'all',
+    sector: 'all',
     search: '',
     sort: 'confidence'
   };
@@ -637,6 +739,7 @@ td.sparkline-cell svg { display: block; }
       if (filters.category !== 'all' && r.patternCategory !== filters.category) return false;
       if (filters.direction !== 'all' && r.direction !== filters.direction) return false;
       if (filters.timeframe !== 'all' && r.timeframe !== filters.timeframe) return false;
+      if (filters.sector !== 'all' && r.sector !== filters.sector) return false;
       if (q && r.symbol.toLowerCase().indexOf(q) === -1 && r.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -693,7 +796,7 @@ td.sparkline-cell svg { display: block; }
       var cc = confColor(r.confidence);
 
       html += '<tr data-idx="' + i + '" class="result-row">';
-      html += '<td class="symbol-cell" data-label="Stock">' + escapeHtml(r.symbol) + '<span class="stock-name">' + escapeHtml(r.name) + '</span></td>';
+      html += '<td class="symbol-cell" data-label="Stock"><a class="symbol-link" href="/?symbol=' + encodeURIComponent(r.symbol) + '&market=nse" onclick="event.stopPropagation()">' + escapeHtml(r.symbol) + '</a><span class="stock-name">' + escapeHtml(r.name) + '</span></td>';
       html += '<td class="price-cell" data-label="Price">' + formatPrice(r.price) + '</td>';
       html += '<td class="change-cell ' + dcClass + '" data-label="Daily Chg">' + formatPct(r.dailyChange) + '</td>';
       html += '<td class="change-cell ' + wcClass + '" data-label="Weekly Chg">' + formatPct(r.weeklyChange) + '</td>';
@@ -789,7 +892,222 @@ td.sparkline-cell svg { display: block; }
     }, 200);
   });
 
+  /* ===== SECTOR FILTER ===== */
+  function populateSectorFilter() {
+    var sectors = {};
+    allRows.forEach(function(r) {
+      if (r.sector) sectors[r.sector] = true;
+    });
+    var select = document.getElementById('sectorSelect');
+    Object.keys(sectors).sort().forEach(function(sec) {
+      var opt = document.createElement('option');
+      opt.value = sec;
+      opt.textContent = sec;
+      select.appendChild(opt);
+    });
+  }
+  document.getElementById('sectorSelect').addEventListener('change', function() {
+    filters.sector = this.value;
+    render();
+  });
+
+  /* ===== REFRESH BUTTON ===== */
+  document.getElementById('refreshBtn').addEventListener('click', function() {
+    window.location.reload();
+  });
+
+  /* ===== RUN SCAN ===== */
+  var scanPollTimer = null;
+
+  function setScanProgress(pct, message) {
+    var fill = document.getElementById('scanProgressFill');
+    var text = document.getElementById('scanProgressText');
+    fill.style.width = Math.max(0, Math.min(100, pct || 0)) + '%';
+    text.textContent = message || '';
+  }
+
+  function pollScanStatus() {
+    fetch('/api/scanner/status')
+      .then(function(res) { return res.json(); })
+      .then(function(status) {
+        var prog = (status && status.progress) || {};
+        var total = prog.total || 0;
+        var scanned = prog.scanned || 0;
+        var pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
+        var phaseLabels = {
+          idle: 'Idle',
+          starting: 'Starting scan...',
+          fetching_daily: 'Fetching daily data...',
+          fetching_weekly: 'Fetching weekly data...',
+          analyzing: 'Analyzing patterns...',
+          generating: 'Generating dashboard...',
+          complete: 'Scan complete',
+          error: 'Scan error'
+        };
+        var label = phaseLabels[prog.phase] || prog.phase || 'Scanning...';
+        var msg = label + (prog.currentSymbol ? ' (' + prog.currentSymbol + ')' : '') +
+          (total > 0 ? ' \\u2014 ' + scanned + '/' + total : '');
+        setScanProgress(pct, msg);
+
+        if (!status || !status.running) {
+          clearInterval(scanPollTimer);
+          scanPollTimer = null;
+          if (prog.phase === 'error') {
+            setScanProgress(pct, 'Scan failed');
+            var btn = document.getElementById('runScanBtn');
+            if (btn) btn.disabled = false;
+          } else {
+            setScanProgress(100, 'Scan complete. Reloading...');
+            setTimeout(function() { window.location.reload(); }, 800);
+          }
+        }
+      })
+      .catch(function() {
+        clearInterval(scanPollTimer);
+        scanPollTimer = null;
+        setScanProgress(0, 'Error checking scan status');
+        var btn = document.getElementById('runScanBtn');
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  document.getElementById('runScanBtn').addEventListener('click', function() {
+    var btn = this;
+    btn.disabled = true;
+    var progress = document.getElementById('scanProgress');
+    progress.classList.remove('hidden');
+    setScanProgress(0, 'Starting scan...');
+
+    fetch('/api/scanner/run', { method: 'POST' })
+      .then(function(res) {
+        return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+      })
+      .then(function(result) {
+        if (!result.ok) {
+          setScanProgress(0, (result.data && result.data.error) || 'Failed to start scan');
+          btn.disabled = false;
+          return;
+        }
+        if (scanPollTimer) clearInterval(scanPollTimer);
+        scanPollTimer = setInterval(pollScanStatus, 2000);
+        pollScanStatus();
+      })
+      .catch(function() {
+        setScanProgress(0, 'Failed to start scan');
+        btn.disabled = false;
+      });
+  });
+
+  /* ===== STOCK LIST VIEW ===== */
+  var stockListData = [];
+  var stockListLoaded = false;
+  var stockListFilters = { search: '', sector: 'all' };
+  var showingStockList = false;
+  var stockListSearchTimeout;
+
+  function populateStockListSectors() {
+    var sectors = {};
+    stockListData.forEach(function(s) {
+      if (s.sector) sectors[s.sector] = true;
+    });
+    var select = document.getElementById('stockListSectorSelect');
+    Object.keys(sectors).sort().forEach(function(sec) {
+      var opt = document.createElement('option');
+      opt.value = sec;
+      opt.textContent = sec;
+      select.appendChild(opt);
+    });
+  }
+
+  function renderStockList() {
+    var q = stockListFilters.search.toLowerCase();
+    var filtered = stockListData.filter(function(s) {
+      if (stockListFilters.sector !== 'all' && s.sector !== stockListFilters.sector) return false;
+      if (q && (s.symbol || '').toLowerCase().indexOf(q) === -1 && (s.name || '').toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    });
+
+    document.getElementById('stockListCount').textContent = filtered.length;
+
+    var tbody = document.getElementById('stockListBody');
+    var noRes = document.getElementById('stockListNoResults');
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '';
+      noRes.style.display = 'block';
+      return;
+    }
+    noRes.style.display = 'none';
+
+    var html = '';
+    filtered.forEach(function(s) {
+      html += '<tr>';
+      html += '<td class="symbol-cell" data-label="Symbol">' + escapeHtml(s.symbol || '') + '</td>';
+      html += '<td data-label="Name">' + escapeHtml(s.name || '') + '</td>';
+      html += '<td data-label="Sector">' + escapeHtml(s.sector || '') + '</td>';
+      html += '<td data-label="Action"><a class="scan-btn secondary" style="display:inline-block;text-decoration:none;" href="/?symbol=' + encodeURIComponent(s.symbol || '') + '&market=nse">View Chart</a></td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+  }
+
+  function loadStockList() {
+    fetch('/api/scanner/symbols')
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        stockListData = Array.isArray(data) ? data : (data && data.symbols) || [];
+        stockListLoaded = true;
+        populateStockListSectors();
+        renderStockList();
+      })
+      .catch(function() {
+        var tbody = document.getElementById('stockListBody');
+        tbody.innerHTML = '';
+        var noRes = document.getElementById('stockListNoResults');
+        noRes.style.display = 'block';
+        var nrText = noRes.querySelector('.nr-text');
+        if (nrText) nrText.textContent = 'Failed to load stock list';
+      });
+  }
+
+  document.getElementById('stockListSearch').addEventListener('input', function() {
+    var val = this.value;
+    clearTimeout(stockListSearchTimeout);
+    stockListSearchTimeout = setTimeout(function() {
+      stockListFilters.search = val;
+      renderStockList();
+    }, 200);
+  });
+
+  document.getElementById('stockListSectorSelect').addEventListener('change', function() {
+    stockListFilters.sector = this.value;
+    renderStockList();
+  });
+
+  document.getElementById('stockListToggleBtn').addEventListener('click', function() {
+    showingStockList = !showingStockList;
+    var scannerView = document.getElementById('scannerView');
+    var stockListView = document.getElementById('stockListView');
+    var scannerLink = document.getElementById('navScannerLink');
+
+    if (showingStockList) {
+      scannerView.classList.add('hidden');
+      stockListView.classList.remove('hidden');
+      this.classList.add('active');
+      scannerLink.classList.remove('active');
+      if (!stockListLoaded) {
+        loadStockList();
+      }
+    } else {
+      scannerView.classList.remove('hidden');
+      stockListView.classList.add('hidden');
+      this.classList.remove('active');
+      scannerLink.classList.add('active');
+    }
+  });
+
   /* ===== INITIAL RENDER ===== */
+  populateSectorFilter();
   render();
 })();
 </script>

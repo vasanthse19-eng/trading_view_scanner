@@ -280,6 +280,39 @@
       .toolbar-section.center { display: none; }
       .search-input { width: 140px; }
     }
+
+    /* Loading overlay */
+    .chart-loading-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(11, 14, 17, 0.85);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 50; transition: opacity 0.3s;
+    }
+    .chart-loading-overlay.hidden { opacity: 0; pointer-events: none; }
+    .chart-loading-spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top: 3px solid #2962ff;
+      border-radius: 50%;
+      animation: clSpin 0.8s linear infinite;
+    }
+    @keyframes clSpin { to { transform: rotate(360deg); } }
+    .chart-loading-text { margin-top: 12px; color: #787b86; font-size: 13px; }
+    /* Error overlay */
+    .chart-error-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(11, 14, 17, 0.9);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 51;
+    }
+    .chart-error-overlay.hidden { display: none; }
+    .error-icon { font-size: 36px; margin-bottom: 10px; }
+    .error-text { color: #787b86; margin-bottom: 14px; font-size: 13px; }
+    .retry-btn {
+      background: #2962ff; color: #fff; border: none;
+      padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 13px;
+    }
+    .retry-btn:hover { background: #1e53e5; }
   </style>
 </head>
 <body>
@@ -332,6 +365,7 @@
       <button class="icon-btn" id="btn-hotkeys" title="Hotkeys">⌨️</button>
       <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
       <button class="icon-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
+      <a href="/api/scanner/dashboard" class="icon-btn" title="Pattern Scanner" style="text-decoration:none;font-size:16px;">📊</a>
     </div>
   </header>
 
@@ -367,6 +401,15 @@
         <span class="info-ohlc" id="info-ohlc"></span>
       </div>
       <div id="main-chart-container">
+        <div class="chart-loading-overlay hidden" id="chart-loading">
+          <div class="chart-loading-spinner"></div>
+          <div class="chart-loading-text" id="chart-loading-text">Loading...</div>
+        </div>
+        <div class="chart-error-overlay hidden" id="chart-error">
+          <div class="error-icon">⚠️</div>
+          <div class="error-text" id="chart-error-text">Failed to load data</div>
+          <button class="retry-btn" id="chart-retry-btn">Retry</button>
+        </div>
         <canvas id="trendline-canvas"></canvas>
       </div>
       <div id="rsi-chart-container" class="sub-chart-container hidden">
@@ -719,16 +762,39 @@ const API = {
   binanceIntervals: { '1m':'1m', '5m':'5m', '15m':'15m', '1h':'1h', '2h':'2h', '4h':'4h', '1D':'1d', '3D':'3d', '1W':'1w', '1M':'1M' },
   // Yahoo range/interval mapping
   yahooMap: {
-    '1m': { range: '1d', interval: '1m' }, '5m': { range: '5d', interval: '5m' },
-    '15m': { range: '5d', interval: '15m' }, '1h': { range: '1mo', interval: '60m' },
-    '2h': { range: '3mo', interval: '60m' }, '4h': { range: '6mo', interval: '1d' },
-    '1D': { range: '1y', interval: '1d' }, '3D': { range: '5y', interval: '1wk' },
-    '1W': { range: '5y', interval: '1wk' }, '1M': { range: '10y', interval: '1mo' }
+    '1m':  { range: '1d',  interval: '1m' },
+    '5m':  { range: '5d',  interval: '5m' },
+    '15m': { range: '5d',  interval: '15m' },
+    '1h':  { range: '6mo', interval: '60m' },
+    '2h':  { range: '3mo', interval: '60m', aggregate: 2 },
+    '4h':  { range: '6mo', interval: '60m', aggregate: 4 },
+    '1D':  { range: '5y',  interval: '1d' },
+    '3D':  { range: '5y',  interval: '1d',  aggregate: 3 },
+    '1W':  { range: 'max', interval: '1wk' },
+    '1M':  { range: 'max', interval: '1mo' }
+  },
+
+  aggregateCandles(candles, factor) {
+    if (!factor || factor <= 1) return candles;
+    const result = [];
+    for (let i = 0; i < candles.length; i += factor) {
+      const chunk = candles.slice(i, i + factor);
+      if (chunk.length === 0) continue;
+      result.push({
+        time: chunk[0].time,
+        open: chunk[0].open,
+        high: Math.max(...chunk.map(c => c.high)),
+        low: Math.min(...chunk.map(c => c.low)),
+        close: chunk[chunk.length - 1].close,
+        volume: chunk.reduce((sum, c) => sum + (c.volume || 0), 0)
+      });
+    }
+    return result;
   },
   finnhubRes: { '1m':'1', '5m':'5', '15m':'15', '1h':'60', '2h':'60', '4h':'D', '1D':'D', '3D':'D', '1W':'W', '1M':'M' },
 
   // --- Binance REST ---
-  async fetchBinanceKlines(symbol, interval, limit = 500) {
+  async fetchBinanceKlines(symbol, interval, limit = 1000) {
     const bi = this.binanceIntervals[interval] || '1h';
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${bi}&limit=${limit}`;
     const resp = await fetch(url);
@@ -831,6 +897,11 @@ const API = {
         });
       }
     }
+    // Aggregate candles for timeframes without native Yahoo intervals (2h, 4h, 3D)
+    const mapEntry = this.yahooMap[AppState.currentTimeframe] || {};
+    if (mapEntry.aggregate && mapEntry.aggregate > 1) {
+      return this.aggregateCandles(candles, mapEntry.aggregate);
+    }
     return candles;
   },
 
@@ -862,7 +933,12 @@ const API = {
     if (!key) throw new Error('No Finnhub key');
     const res = this.finnhubRes[timeframe] || 'D';
     const now = Math.floor(Date.now() / 1000);
-    const ranges = { '1m': 86400, '5m': 86400*5, '15m': 86400*5, '1h': 86400*30, '4h': 86400*180, '1D': 86400*365, '1W': 86400*365*3 };
+    const ranges = {
+      '1m': 86400, '5m': 86400*5, '15m': 86400*5,
+      '1h': 86400*180, '2h': 86400*90, '4h': 86400*180,
+      '1D': 86400*365*5, '3D': 86400*365*5,
+      '1W': 86400*365*10, '1M': 86400*365*10
+    };
     const from = now - (ranges[timeframe] || 86400*30);
     const url = `https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=${res}&from=${from}&to=${now}&token=${key}`;
     const resp = await fetch(url);
@@ -1275,6 +1351,19 @@ const ChartManager = {
     this.setupCrosshair();
     window.addEventListener('resize', () => this.handleResize());
     this.handleResize();
+  },
+
+  showLoading(text) {
+    const overlay = document.getElementById('chart-loading');
+    const label = document.getElementById('chart-loading-text');
+    if (label) label.textContent = text || 'Loading...';
+    if (overlay) overlay.classList.remove('hidden');
+    const errOv = document.getElementById('chart-error');
+    if (errOv) errOv.classList.add('hidden');
+  },
+  hideLoading() {
+    const overlay = document.getElementById('chart-loading');
+    if (overlay) overlay.classList.add('hidden');
   },
 
   createOverlays() {
@@ -2294,6 +2383,15 @@ const UIController = {
   },
 
   bindEvents() {
+    // Retry button for chart errors
+    const retryBtn = document.getElementById('chart-retry-btn');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        document.getElementById('chart-error').classList.add('hidden');
+        App.loadChartData();
+      });
+    }
+
     // Search
     const searchInput = document.getElementById('search-input');
     const searchDropdown = document.getElementById('search-dropdown');
@@ -2606,7 +2704,35 @@ function activateTool(tool) {
 const App = {
   async init() {
     Storage.restore();
+
+    // Parse URL parameters for deep-linking from scanner dashboard
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramSymbol = urlParams.get('symbol');
+    const paramMarket = urlParams.get('market');
+    const paramTimeframe = urlParams.get('timeframe');
+    if (paramSymbol) {
+      AppState.currentSymbol = paramSymbol;
+      if (paramMarket) AppState.currentMarket = paramMarket;
+      if (paramTimeframe) AppState.currentTimeframe = paramTimeframe;
+      // Add to watchlist if not already there
+      if (!AppState.watchlist.find(w => w.symbol === paramSymbol)) {
+        AppState.watchlist.push({ symbol: paramSymbol, market: paramMarket || 'nse', name: paramSymbol.replace('.NS','').replace('.BO','') });
+      }
+      // Clean URL
+      if (window.history.replaceState) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+
     ChartManager.init();
+
+    // Sync market toggle and symbol display after any URL override
+    document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
+    const activeMarketBtn = document.querySelector('.market-btn[data-market="' + AppState.currentMarket + '"]');
+    if (activeMarketBtn) activeMarketBtn.classList.add('active');
+    const infoSym = document.getElementById('info-symbol');
+    if (infoSym) infoSym.textContent = AppState.currentSymbol.replace('USDT','').replace('.NS',' (NSE)').replace('.BO',' (BSE)');
+
     TrendlineManager.init();
     UIController.bindEvents();
     AlertManager.requestPermission();
@@ -2624,6 +2750,12 @@ const App = {
   },
 
   async switchSymbol(symbol, market) {
+    // Fade chart and clear stale data
+    const chartArea = document.getElementById('chart-area');
+    if (chartArea) { chartArea.style.transition = 'opacity 0.15s'; chartArea.style.opacity = '0.5'; }
+    if (AppState.series && AppState.series.candlestick) {
+      try { AppState.series.candlestick.setData([]); } catch(e) {}
+    }
     AppState.currentSymbol = symbol;
     AppState.currentMarket = market;
     AppState.prevPrices = {};
@@ -2648,6 +2780,8 @@ const App = {
 
   async loadChartData() {
     try {
+      const sym = AppState.currentSymbol.replace('USDT','').replace('.NS','').replace('.BO','');
+      ChartManager.showLoading('Loading ' + sym + ' ' + AppState.currentTimeframe + '...');
       StatusBar.update(false, 'Loading data...');
       const candles = await API.fetchCandles(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
       ChartManager.updateChartData(candles);
@@ -2656,9 +2790,17 @@ const App = {
       StatusBar.update(true, sources[AppState.currentMarket] || 'Yahoo Finance');
     } catch(e) {
       console.error('Failed to load chart data:', e);
+      const errText = document.getElementById('chart-error-text');
+      if (errText) errText.textContent = 'Failed to load ' + AppState.currentSymbol + ': ' + e.message;
+      const errOverlay = document.getElementById('chart-error');
+      if (errOverlay) errOverlay.classList.remove('hidden');
       const demo = DemoData.generate(AppState.currentSymbol, AppState.currentMarket);
       ChartManager.updateChartData(demo);
       StatusBar.update(false, 'Demo data (error loading)');
+    } finally {
+      ChartManager.hideLoading();
+      const chartArea = document.getElementById('chart-area');
+      if (chartArea) chartArea.style.opacity = '1';
     }
   },
 
