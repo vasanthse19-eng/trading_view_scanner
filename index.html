@@ -719,18 +719,70 @@ const THEMES = {
 };
 
 const AppState = {
-  currentSymbol: 'BTCUSDT',
-  currentMarket: 'crypto',
-  currentTimeframe: '1h',
+  currentSymbol: 'RELIANCE.NS',
+  currentMarket: 'nse',
+  currentTimeframe: '1D',
   chartType: 'candlestick', // candlestick | line | area | heikinashi
   currentTheme: 'dark',
   activeIndicators: new Set(['volume']),
   candles: [],
   watchlist: [],
   watchlists: [
-    { id: 'default', name: 'My Watchlist', stocks: [] }
+    { id: 'us_stocks', name: '🇺🇸 US Stocks', stocks: [
+      { symbol: 'AAPL', market: 'stocks', name: 'Apple Inc.' },
+      { symbol: 'MSFT', market: 'stocks', name: 'Microsoft' },
+      { symbol: 'GOOGL', market: 'stocks', name: 'Alphabet' },
+      { symbol: 'AMZN', market: 'stocks', name: 'Amazon' },
+      { symbol: 'NVDA', market: 'stocks', name: 'NVIDIA' },
+      { symbol: 'META', market: 'stocks', name: 'Meta Platforms' },
+      { symbol: 'TSLA', market: 'stocks', name: 'Tesla' },
+      { symbol: 'JPM', market: 'stocks', name: 'JPMorgan Chase' },
+      { symbol: 'V', market: 'stocks', name: 'Visa Inc.' },
+      { symbol: 'NFLX', market: 'stocks', name: 'Netflix' }
+    ]},
+    { id: 'crypto', name: '₿ Crypto', stocks: [
+      { symbol: 'BTCUSDT', market: 'crypto', name: 'Bitcoin' },
+      { symbol: 'ETHUSDT', market: 'crypto', name: 'Ethereum' },
+      { symbol: 'BNBUSDT', market: 'crypto', name: 'BNB' },
+      { symbol: 'SOLUSDT', market: 'crypto', name: 'Solana' },
+      { symbol: 'XRPUSDT', market: 'crypto', name: 'XRP' },
+      { symbol: 'ADAUSDT', market: 'crypto', name: 'Cardano' },
+      { symbol: 'DOGEUSDT', market: 'crypto', name: 'Dogecoin' },
+      { symbol: 'AVAXUSDT', market: 'crypto', name: 'Avalanche' },
+      { symbol: 'DOTUSDT', market: 'crypto', name: 'Polkadot' },
+      { symbol: 'MATICUSDT', market: 'crypto', name: 'Polygon' }
+    ]},
+    { id: 'nse', name: '🇮🇳 NSE', stocks: [
+      { symbol: 'RELIANCE.NS', market: 'nse', name: 'Reliance Industries' },
+      { symbol: 'TCS.NS', market: 'nse', name: 'Tata Consultancy' },
+      { symbol: 'HDFCBANK.NS', market: 'nse', name: 'HDFC Bank' },
+      { symbol: 'INFY.NS', market: 'nse', name: 'Infosys' },
+      { symbol: 'ICICIBANK.NS', market: 'nse', name: 'ICICI Bank' },
+      { symbol: 'SBIN.NS', market: 'nse', name: 'State Bank of India' },
+      { symbol: 'BHARTIARTL.NS', market: 'nse', name: 'Bharti Airtel' },
+      { symbol: 'ITC.NS', market: 'nse', name: 'ITC Ltd' },
+      { symbol: 'KOTAKBANK.NS', market: 'nse', name: 'Kotak Mahindra Bank' },
+      { symbol: 'LT.NS', market: 'nse', name: 'Larsen & Toubro' },
+      { symbol: 'HINDUNILVR.NS', market: 'nse', name: 'Hindustan Unilever' },
+      { symbol: 'BAJFINANCE.NS', market: 'nse', name: 'Bajaj Finance' },
+      { symbol: 'TATAMOTORS.NS', market: 'nse', name: 'Tata Motors' },
+      { symbol: 'MARUTI.NS', market: 'nse', name: 'Maruti Suzuki' },
+      { symbol: 'SUNPHARMA.NS', market: 'nse', name: 'Sun Pharmaceutical' }
+    ]},
+    { id: 'commodities', name: '🛢️ Commodities', stocks: [
+      { symbol: 'GC=F', market: 'stocks', name: 'Gold Futures' },
+      { symbol: 'SI=F', market: 'stocks', name: 'Silver Futures' },
+      { symbol: 'CL=F', market: 'stocks', name: 'Crude Oil WTI' },
+      { symbol: 'BZ=F', market: 'stocks', name: 'Brent Crude Oil' },
+      { symbol: 'NG=F', market: 'stocks', name: 'Natural Gas' },
+      { symbol: 'HG=F', market: 'stocks', name: 'Copper' },
+      { symbol: 'PL=F', market: 'stocks', name: 'Platinum' },
+      { symbol: 'ZW=F', market: 'stocks', name: 'Wheat' },
+      { symbol: 'ZC=F', market: 'stocks', name: 'Corn' },
+      { symbol: 'CT=F', market: 'stocks', name: 'Cotton' }
+    ]}
   ],
-  activeWatchlistId: 'default',
+  activeWatchlistId: 'nse',
   alerts: [],
   alertHistory: [],
   trendlines: [],
@@ -796,21 +848,12 @@ const Storage = {
       AppState.chartType = d.chartType || 'candlestick';
       AppState.currentTheme = d.theme || 'dark';
     } else {
-      // Default watchlist
-      AppState.watchlist = [
-        { symbol: 'BTCUSDT', market: 'crypto', name: 'Bitcoin' },
-        { symbol: 'ETHUSDT', market: 'crypto', name: 'Ethereum' },
-        { symbol: 'SOLUSDT', market: 'crypto', name: 'Solana' },
-        { symbol: 'AAPL', market: 'stocks', name: 'Apple Inc.' },
-        { symbol: 'MSFT', market: 'stocks', name: 'Microsoft' },
-        { symbol: 'RELIANCE.NS', market: 'nse', name: 'Reliance Industries' },
-        { symbol: 'TCS.NS', market: 'nse', name: 'Tata Consultancy' },
-        { symbol: 'HDFCBANK.NS', market: 'nse', name: 'HDFC Bank' },
-        { symbol: 'INFY.NS', market: 'nse', name: 'Infosys' },
-        { symbol: 'RELIANCE.BO', market: 'bse', name: 'Reliance Industries' },
-        { symbol: 'TCS.BO', market: 'bse', name: 'Tata Consultancy' },
-        { symbol: 'HDFCBANK.BO', market: 'bse', name: 'HDFC Bank' },
-      ];
+      // First visit — use default watchlists from AppState, set NSE as active
+      const active = AppState.watchlists.find(w => w.id === AppState.activeWatchlistId) || AppState.watchlists[0];
+      AppState.watchlist = active.stocks;
+      AppState.currentSymbol = 'RELIANCE.NS';
+      AppState.currentMarket = 'nse';
+      AppState.currentTimeframe = '1D';
     }
   }
 };
