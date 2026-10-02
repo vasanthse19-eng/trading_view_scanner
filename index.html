@@ -163,9 +163,37 @@
 
     /* Watchlist sidebar */
     #watchlist-panel {
-      width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--bg-secondary);
+      width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-secondary);
       border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;
     }
+
+    /* Watchlist Tabs */
+    .wl-tabs {
+      display: flex; overflow-x: auto; border-bottom: 1px solid var(--border-color);
+      scrollbar-width: none; flex-shrink: 0;
+    }
+    .wl-tabs::-webkit-scrollbar { display: none; }
+    .wl-tab {
+      padding: 6px 12px; font-size: 11px; cursor: pointer; white-space: nowrap;
+      color: var(--text-secondary); border-bottom: 2px solid transparent;
+      transition: all 0.15s; flex-shrink: 0;
+    }
+    .wl-tab:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+    .wl-tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+    .wl-tab-add {
+      padding: 4px 10px; font-size: 14px; cursor: pointer; background: transparent;
+      border: none; color: var(--text-secondary); flex-shrink: 0;
+    }
+    .wl-tab-add:hover { color: var(--text-primary); }
+    .wl-tab-ctx {
+      position: fixed; background: var(--bg-tertiary); border: 1px solid var(--border-color);
+      border-radius: var(--radius); box-shadow: var(--shadow); z-index: 300; min-width: 120px;
+    }
+    .wl-tab-ctx-item {
+      padding: 6px 14px; cursor: pointer; font-size: 12px; color: var(--text-primary);
+    }
+    .wl-tab-ctx-item:hover { background: var(--bg-elevated); }
+    .wl-tab-ctx-item.danger { color: var(--color-bearish); }
     .panel-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 12px; border-bottom: 1px solid var(--border-color); font-weight: 600; font-size: 12px;
@@ -192,6 +220,29 @@
     .wl-item:hover .wl-remove { display: block; }
     .price-up { color: var(--color-bullish); }
     .price-down { color: var(--color-bearish); }
+
+    /* Color-coded watchlist */
+    .wl-item.positive { border-left: 3px solid var(--color-bullish); }
+    .wl-item.negative { border-left: 3px solid var(--color-bearish); }
+    .wl-item.positive .wl-price { color: var(--color-bullish); }
+    .wl-item.negative .wl-price { color: var(--color-bearish); }
+    .wl-item.strong-positive { background: var(--color-bullish-bg); }
+    .wl-item.strong-negative { background: var(--color-bearish-bg); }
+
+    /* Price flash animation */
+    @keyframes flashGreen { 0%{background:rgba(38,166,154,0.3);} 100%{background:transparent;} }
+    @keyframes flashRed { 0%{background:rgba(239,83,80,0.3);} 100%{background:transparent;} }
+    .wl-item.flash-up { animation: flashGreen 0.6s ease-out; }
+    .wl-item.flash-down { animation: flashRed 0.6s ease-out; }
+
+    /* Market badge */
+    .wl-market-badge {
+      font-size: 8px; padding: 1px 4px; border-radius: 2px; font-weight: 600;
+      line-height: 1; display: inline-block; margin-left: 4px; vertical-align: middle;
+    }
+    .wl-market-badge.nse { background: rgba(255,152,0,0.2); color: #ff9800; }
+    .wl-market-badge.bse { background: rgba(76,175,80,0.2); color: #4caf50; }
+    .wl-market-badge.crypto { background: rgba(33,150,243,0.2); color: #2196f3; }
 
     /* Chart area */
     #chart-area { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
@@ -221,7 +272,7 @@
 
     /* Alert panel */
     #alert-panel {
-      width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--bg-secondary);
+      width: var(--sidebar-width); flex-shrink: 0; background: var(--bg-secondary);
       border-left: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;
     }
     .alert-form { padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
@@ -304,6 +355,21 @@
     }
     .context-menu-item:hover { background: var(--bg-elevated); }
     .context-menu-item.danger { color: var(--color-bearish); }
+
+    /* Panel Dividers */
+    .panel-divider {
+      width: 5px; cursor: col-resize; background: var(--border-color);
+      transition: background 0.15s; flex-shrink: 0; position: relative; z-index: 10;
+    }
+    .panel-divider:hover, .panel-divider.dragging { background: var(--accent-blue); }
+    .panel-divider::after {
+      content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 3px; height: 30px; border-left: 1px dotted var(--text-disabled);
+      border-right: 1px dotted var(--text-disabled); opacity: 0; transition: opacity 0.15s;
+    }
+    .panel-divider:hover::after { opacity: 1; }
+    body.panel-resizing { cursor: col-resize !important; user-select: none !important; }
+    body.panel-resizing iframe { pointer-events: none !important; }
 
     /* Responsive */
     @media (max-width: 1024px) {
@@ -394,6 +460,7 @@
         <span>Watchlist</span>
         <button id="btn-add-watchlist" title="Add from search">+</button>
       </div>
+      <div class="wl-tabs" id="wl-tabs"></div>
       <div style="display:flex;gap:4px;padding:4px 8px;border-bottom:1px solid var(--border-color);">
         <button class="btn-primary" style="font-size:10px;padding:3px 6px;" onclick="API.addAllStocks('nse');this.textContent='✓ Added';">+ All NSE</button>
         <button class="btn-primary" style="font-size:10px;padding:3px 6px;" onclick="API.addAllStocks('bse');this.textContent='✓ Added';">+ All BSE</button>
@@ -408,10 +475,14 @@
       <div class="watchlist-items" id="watchlist-items"></div>
     </aside>
 
+    <div class="panel-divider" id="divider-left"></div>
+
     <!-- Chart Area -->
     <main id="chart-area" style="position:relative;flex:1;overflow:hidden;">
       <div id="tv-widget-container" style="width:100%;height:100%;"></div>
     </main>
+
+    <div class="panel-divider" id="divider-right"></div>
 
     <!-- Alert Panel -->
     <aside id="alert-panel">
@@ -641,6 +712,10 @@ const AppState = {
   activeIndicators: new Set(['volume']),
   candles: [],
   watchlist: [],
+  watchlists: [
+    { id: 'default', name: 'My Watchlist', stocks: [] }
+  ],
+  activeWatchlistId: 'default',
   alerts: [],
   alertHistory: [],
   trendlines: [],
@@ -663,6 +738,8 @@ const Storage = {
   save() {
     const data = {
       watchlist: AppState.watchlist,
+      watchlists: AppState.watchlists,
+      activeWatchlistId: AppState.activeWatchlistId,
       alerts: AppState.alerts,
       alertHistory: AppState.alertHistory.slice(0, 100),
       trendlines: AppState.trendlines,
@@ -682,7 +759,17 @@ const Storage = {
   restore() {
     const d = this.load();
     if (d) {
-      AppState.watchlist = d.watchlist || [];
+      if (d.watchlists && d.watchlists.length) {
+        AppState.watchlists = d.watchlists;
+        AppState.activeWatchlistId = d.activeWatchlistId || d.watchlists[0].id;
+        const active = AppState.watchlists.find(w => w.id === AppState.activeWatchlistId);
+        AppState.watchlist = active ? active.stocks : (d.watchlist || []);
+      } else {
+        // No saved watchlists — migrate old single watchlist into the default one
+        AppState.watchlist = d.watchlist || [];
+        AppState.watchlists[0].stocks = AppState.watchlist;
+        AppState.activeWatchlistId = AppState.watchlists[0].id;
+      }
       AppState.alerts = d.alerts || [];
       AppState.alertHistory = d.alertHistory || [];
       AppState.trendlines = d.trendlines || [];
@@ -1353,15 +1440,15 @@ const Watchlist = {
   },
 
   add(symbol, market, name) {
-    if (AppState.watchlist.some(w => w.symbol === symbol && w.market === market)) return;
-    AppState.watchlist.push({ symbol, market, name });
-    Storage.save();
-    UIController.renderWatchlist();
-    this.restart();
+    WatchlistManager.addToWatchlist(symbol, market, name);
   },
 
   remove(symbol, market) {
-    AppState.watchlist = AppState.watchlist.filter(w => !(w.symbol === symbol && w.market === market));
+    const active = WatchlistManager.getActive();
+    if (active) {
+      active.stocks = active.stocks.filter(w => !(w.symbol === symbol && w.market === market));
+      AppState.watchlist = active.stocks;
+    }
     Storage.save();
     UIController.renderWatchlist();
     this.restart();
@@ -1489,6 +1576,283 @@ const StatusBar = {
   }
 };
 
+// ==================== PANEL RESIZER ====================
+const PanelResizer = {
+  MIN_WIDTH: 150,
+  MAX_WIDTH: 450,
+  DEFAULT_WIDTH: 240,
+
+  init() {
+    const leftDiv = document.getElementById('divider-left');
+    const rightDiv = document.getElementById('divider-right');
+    if (leftDiv) this.setupDivider(leftDiv, 'watchlist-panel', 'left');
+    if (rightDiv) this.setupDivider(rightDiv, 'alert-panel', 'right');
+    this.restoreWidths();
+  },
+
+  setupDivider(divider, panelId, side) {
+    const panel = document.getElementById(panelId);
+    let startX, startWidth;
+
+    const onMouseDown = (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = panel.getBoundingClientRect().width;
+      divider.classList.add('dragging');
+      document.body.classList.add('panel-resizing');
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    };
+
+    const onMouseMove = (e) => {
+      const diff = side === 'left' ? (e.clientX - startX) : (startX - e.clientX);
+      const newWidth = Math.min(this.MAX_WIDTH, Math.max(this.MIN_WIDTH, startWidth + diff));
+      panel.style.width = newWidth + 'px';
+    };
+
+    const onMouseUp = () => {
+      divider.classList.remove('dragging');
+      document.body.classList.remove('panel-resizing');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      this.saveWidths();
+      // Trigger TradingView widget resize
+      if (TVChart.widget && TVChart.widget.resize) {
+        try { TVChart.widget.resize(); } catch(e) {}
+      }
+      window.dispatchEvent(new Event('resize'));
+    };
+
+    divider.addEventListener('mousedown', onMouseDown);
+
+    // Double-click to reset
+    divider.addEventListener('dblclick', () => {
+      panel.style.width = this.DEFAULT_WIDTH + 'px';
+      this.saveWidths();
+      window.dispatchEvent(new Event('resize'));
+    });
+  },
+
+  saveWidths() {
+    const wl = document.getElementById('watchlist-panel');
+    const al = document.getElementById('alert-panel');
+    try {
+      localStorage.setItem('tv_panel_widths', JSON.stringify({
+        watchlist: parseInt(wl.style.width) || this.DEFAULT_WIDTH,
+        alerts: parseInt(al.style.width) || this.DEFAULT_WIDTH
+      }));
+    } catch(e) {}
+  },
+
+  restoreWidths() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('tv_panel_widths'));
+      if (saved) {
+        if (saved.watchlist) document.getElementById('watchlist-panel').style.width = saved.watchlist + 'px';
+        if (saved.alerts) document.getElementById('alert-panel').style.width = saved.alerts + 'px';
+      }
+    } catch(e) {}
+  }
+};
+
+// ==================== WATCHLIST MANAGER ====================
+const WatchlistManager = {
+  init() {
+    // Migrate old single watchlist to new system
+    if (AppState.watchlists.length === 1 && AppState.watchlists[0].stocks.length === 0 && AppState.watchlist.length > 0) {
+      AppState.watchlists[0].stocks = [...AppState.watchlist];
+    }
+    this.renderTabs();
+  },
+
+  getActive() {
+    return AppState.watchlists.find(w => w.id === AppState.activeWatchlistId) || AppState.watchlists[0];
+  },
+
+  getStocks() {
+    const active = this.getActive();
+    return active ? active.stocks : [];
+  },
+
+  setStocks(stocks) {
+    const active = this.getActive();
+    if (active) {
+      active.stocks = stocks;
+      // Also sync to AppState.watchlist for backward compat
+      AppState.watchlist = stocks;
+    }
+  },
+
+  switchTab(id) {
+    AppState.activeWatchlistId = id;
+    const active = this.getActive();
+    if (active) {
+      AppState.watchlist = active.stocks;
+    }
+    this.renderTabs();
+    UIController.renderWatchlist();
+    Watchlist.restart();
+    Storage.save();
+  },
+
+  createWatchlist(name) {
+    const id = 'wl_' + Date.now();
+    AppState.watchlists.push({ id, name, stocks: [] });
+    this.switchTab(id);
+  },
+
+  renameWatchlist(id, newName) {
+    const wl = AppState.watchlists.find(w => w.id === id);
+    if (wl) { wl.name = newName; this.renderTabs(); Storage.save(); }
+  },
+
+  deleteWatchlist(id) {
+    if (AppState.watchlists.length <= 1) return; // keep at least one
+    AppState.watchlists = AppState.watchlists.filter(w => w.id !== id);
+    if (AppState.activeWatchlistId === id) {
+      this.switchTab(AppState.watchlists[0].id);
+    } else {
+      this.renderTabs();
+      Storage.save();
+    }
+  },
+
+  addToWatchlist(symbol, market, name, watchlistId) {
+    const wl = AppState.watchlists.find(w => w.id === (watchlistId || AppState.activeWatchlistId));
+    if (!wl) return;
+    if (wl.stocks.some(s => s.symbol === symbol && s.market === market)) return;
+    wl.stocks.push({ symbol, market, name });
+    if (wl.id === AppState.activeWatchlistId) {
+      AppState.watchlist = wl.stocks;
+    }
+    Storage.save();
+    if (wl.id === AppState.activeWatchlistId) {
+      UIController.renderWatchlist();
+      Watchlist.restart();
+    }
+  },
+
+  renderTabs() {
+    const container = document.getElementById('wl-tabs');
+    if (!container) return;
+    let html = AppState.watchlists.map(wl => {
+      const isActive = wl.id === AppState.activeWatchlistId;
+      return `<div class="wl-tab ${isActive ? 'active' : ''}" data-id="${wl.id}">${wl.name} <span style="font-size:9px;color:var(--text-disabled);">(${wl.stocks.length})</span></div>`;
+    }).join('');
+    html += `<button class="wl-tab-add" id="btn-new-watchlist" title="New Watchlist">+</button>`;
+    container.innerHTML = html;
+
+    // Tab click handlers
+    container.querySelectorAll('.wl-tab').forEach(tab => {
+      tab.addEventListener('click', () => this.switchTab(tab.dataset.id));
+      tab.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this.showTabContextMenu(e, tab.dataset.id);
+      });
+    });
+
+    // New watchlist button
+    const addBtn = document.getElementById('btn-new-watchlist');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        const name = prompt('Watchlist name:');
+        if (name && name.trim()) this.createWatchlist(name.trim());
+      });
+    }
+  },
+
+  showTabContextMenu(e, id) {
+    // Remove existing context menu
+    document.querySelectorAll('.wl-tab-ctx').forEach(el => el.remove());
+    const menu = document.createElement('div');
+    menu.className = 'wl-tab-ctx';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.innerHTML = `
+      <div class="wl-tab-ctx-item" data-action="rename">✏️ Rename</div>
+      ${AppState.watchlists.length > 1 ? '<div class="wl-tab-ctx-item danger" data-action="delete">🗑️ Delete</div>' : ''}
+    `;
+    document.body.appendChild(menu);
+    menu.querySelectorAll('.wl-tab-ctx-item').forEach(item => {
+      item.addEventListener('click', () => {
+        menu.remove();
+        if (item.dataset.action === 'rename') {
+          const wl = AppState.watchlists.find(w => w.id === id);
+          const newName = prompt('New name:', wl?.name || '');
+          if (newName && newName.trim()) this.renameWatchlist(id, newName.trim());
+        } else if (item.dataset.action === 'delete') {
+          if (confirm('Delete this watchlist?')) this.deleteWatchlist(id);
+        }
+      });
+    });
+    setTimeout(() => {
+      const close = () => { menu.remove(); document.removeEventListener('click', close); };
+      document.addEventListener('click', close);
+    }, 0);
+  },
+
+  // Create pattern watchlists from scanner results
+  async loadPatternWatchlists() {
+    let resultsUrl;
+    const serverUrl = AppState.settings.alertServerUrl;
+    if (serverUrl) {
+      resultsUrl = `${serverUrl}/api/scanner/results`;
+    } else if (window.location.protocol.startsWith('http')) {
+      resultsUrl = `/api/scanner/results`;
+    } else {
+      return;
+    }
+
+    try {
+      const resp = await fetch(resultsUrl);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const results = data.results || [];
+      if (!results.length) return;
+
+      // Group by pattern type
+      const groups = { triangles: [], flags: [], headshoulders: [] };
+      results.forEach(r => {
+        (r.patterns || []).forEach(p => {
+          const entry = { symbol: r.symbol + '.NS', market: 'nse', name: r.name || r.symbol, pattern: p.pattern, confidence: p.confidence, direction: p.direction };
+          if (p.pattern.toLowerCase().includes('triangle')) groups.triangles.push(entry);
+          else if (p.pattern.toLowerCase().includes('flag') || p.pattern.toLowerCase().includes('pole')) groups.flags.push(entry);
+          else if (p.pattern.toLowerCase().includes('head') || p.pattern.toLowerCase().includes('shoulder')) groups.headshoulders.push(entry);
+        });
+      });
+
+      // Create or update pattern watchlists
+      const patternWatchlists = [
+        { prefix: '▲', name: '▲ Triangles', key: 'triangles' },
+        { prefix: '🚩', name: '🚩 Flags', key: 'flags' },
+        { prefix: '👤', name: '👤 H&S', key: 'headshoulders' }
+      ];
+
+      patternWatchlists.forEach(pw => {
+        const stocks = groups[pw.key];
+        if (!stocks.length) return;
+        // De-duplicate by symbol
+        const unique = [];
+        const seen = new Set();
+        stocks.forEach(s => { if (!seen.has(s.symbol)) { seen.add(s.symbol); unique.push(s); } });
+        // Find or create watchlist
+        let existing = AppState.watchlists.find(w => w.name === pw.name);
+        if (existing) {
+          existing.stocks = unique;
+        } else {
+          AppState.watchlists.push({ id: 'pattern_' + pw.key, name: pw.name, stocks: unique });
+        }
+      });
+
+      this.renderTabs();
+      Storage.save();
+      console.log('✅ Pattern watchlists loaded from scanner results');
+    } catch(e) {
+      console.warn('Could not load scanner results for watchlists:', e.message);
+    }
+  }
+};
+
 // ==================== HELPERS ====================
 function fmt(n) {
   if (n == null) return '--';
@@ -1507,22 +1871,23 @@ const UIController = {
   renderWatchlist() {
     const container = document.getElementById('watchlist-items');
     const filter = document.getElementById('wl-filter')?.value || 'all';
-    const filtered = filter === 'all' ? AppState.watchlist : AppState.watchlist.filter(w => w.market === filter);
+    const stocks = AppState.watchlist;
+    const filtered = filter === 'all' ? stocks : stocks.filter(w => w.market === filter);
     container.innerHTML = filtered.map(w => {
       const isActive = w.symbol === AppState.currentSymbol && w.market === AppState.currentMarket;
       const displaySymbol = w.symbol.replace('USDT', '').replace('.NS', '').replace('.BO', '');
-      const marketTag = w.market === 'nse' ? '<span style="font-size:9px;color:#ff9800;margin-left:4px;">NSE</span>' :
-                        w.market === 'bse' ? '<span style="font-size:9px;color:#4caf50;margin-left:4px;">BSE</span>' :
-                        w.market === 'crypto' ? '<span style="font-size:9px;color:#2196f3;margin-left:4px;">₿</span>' : '';
+      const badgeClass = w.market === 'nse' ? 'nse' : w.market === 'bse' ? 'bse' : w.market === 'crypto' ? 'crypto' : '';
+      const badgeText = w.market === 'nse' ? 'NSE' : w.market === 'bse' ? 'BSE' : w.market === 'crypto' ? '₿' : '';
+      const safeId = w.symbol.replace(/[.&]/g, '_');
       return `
-        <div class="wl-item ${isActive ? 'active' : ''}" data-symbol="${w.symbol}" data-market="${w.market}">
-          <div>
-            <div class="wl-symbol">${displaySymbol}${marketTag}</div>
-            <div class="wl-name">${w.name}</div>
+        <div class="wl-item ${isActive ? 'active' : ''}" id="wl-row-${safeId}" data-symbol="${w.symbol}" data-market="${w.market}">
+          <div style="flex:1;min-width:0;">
+            <div class="wl-symbol">${displaySymbol}${badgeText ? `<span class="wl-market-badge ${badgeClass}">${badgeText}</span>` : ''}</div>
+            <div class="wl-name">${w.name || ''}</div>
           </div>
-          <div>
-            <div class="wl-price" id="wl-price-${w.symbol.replace(/[.&]/g,'_')}">--</div>
-            <div class="wl-change" id="wl-change-${w.symbol.replace(/[.&]/g,'_')}">--</div>
+          <div style="text-align:right;min-width:70px;">
+            <div class="wl-price" id="wl-price-${safeId}">--</div>
+            <div class="wl-change" id="wl-change-${safeId}">--</div>
           </div>
           <button class="wl-remove" data-symbol="${w.symbol}" data-market="${w.market}" title="Remove">✕</button>
         </div>`;
@@ -1551,11 +1916,36 @@ const UIController = {
     const safeId = symbol.replace(/[.&]/g, '_');
     const priceEl = document.getElementById(`wl-price-${safeId}`);
     const changeEl = document.getElementById(`wl-change-${safeId}`);
-    if (priceEl) priceEl.textContent = '₹$'[symbol.includes('.') ? 0 : 1] + fmt(price);
+    const rowEl = document.getElementById(`wl-row-${safeId}`);
+    if (!priceEl) return;
+
+    const oldPrice = priceEl.textContent;
+    const currency = symbol.includes('.') ? '₹' : '$';
+    priceEl.textContent = currency + fmt(price);
+
     if (changeEl) {
       const pct = typeof changePercent === 'number' ? changePercent.toFixed(2) : '--';
       changeEl.textContent = (changePercent >= 0 ? '+' : '') + pct + '%';
       changeEl.className = `wl-change ${changePercent >= 0 ? 'price-up' : 'price-down'}`;
+    }
+
+    if (rowEl) {
+      // Color coding based on change
+      rowEl.classList.remove('positive', 'negative', 'strong-positive', 'strong-negative');
+      if (typeof changePercent === 'number') {
+        if (changePercent > 0) rowEl.classList.add('positive');
+        else if (changePercent < 0) rowEl.classList.add('negative');
+        if (changePercent > 2) rowEl.classList.add('strong-positive');
+        else if (changePercent < -2) rowEl.classList.add('strong-negative');
+      }
+
+      // Flash animation on price change
+      const newText = currency + fmt(price);
+      if (oldPrice !== '--' && oldPrice !== newText) {
+        rowEl.classList.remove('flash-up', 'flash-down');
+        void rowEl.offsetWidth; // force reflow
+        rowEl.classList.add(price > parseFloat(oldPrice.replace(/[₹$,]/g, '')) ? 'flash-up' : 'flash-down');
+      }
     }
   },
 
@@ -1802,6 +2192,8 @@ const UIController = {
           btn.disabled = false;
           btn.style.opacity = '1';
         }, 2000);
+        // Refresh pattern watchlists from scan results
+        WatchlistManager.loadPatternWatchlists();
         // Open dashboard with results
         if (confirm(`Scan complete! ${data.totalPatterns || 0} patterns found. Open dashboard?`)) {
           window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
@@ -1913,6 +2305,9 @@ const App = {
     TVChart.load(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
     if (AppState.currentTheme !== 'dark') applyTheme(AppState.currentTheme);
     Watchlist.init();
+    PanelResizer.init();
+    WatchlistManager.init();
+    WatchlistManager.loadPatternWatchlists();
     if (AppState.currentMarket !== 'crypto') this.startStockChartPolling();
 
     StatusBar.update(false, 'Initializing...');

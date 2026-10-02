@@ -127,11 +127,11 @@ async function detectChatId() {
 async function fetchPrice(symbol, market) {
   try {
     if (market === 'crypto') {
-      // Binance REST API
+      // Binance REST API — get 24h ticker for price + change
       const pair = symbol.toUpperCase();
-      const resp = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pair}`);
+      const resp = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`);
       const data = await resp.json();
-      return parseFloat(data.price);
+      return { price: parseFloat(data.lastPrice), change: parseFloat(data.priceChangePercent) || 0 };
     } else {
       // Yahoo Finance for stocks, NSE, BSE
       const resp = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`, {
@@ -140,7 +140,10 @@ async function fetchPrice(symbol, market) {
       const data = await resp.json();
       const meta = data.chart?.result?.[0]?.meta;
       if (meta && meta.regularMarketPrice) {
-        return meta.regularMarketPrice;
+        const price = meta.regularMarketPrice;
+        const prevClose = meta.previousClose || meta.chartPreviousClose || price;
+        const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+        return { price, change };
       }
     }
   } catch (e) {
@@ -167,9 +170,10 @@ async function checkAllAlerts() {
 
   for (const key of Object.keys(symbolGroups)) {
     const group = symbolGroups[key];
-    const price = await fetchPrice(group.symbol, group.market);
-    if (price === null) continue;
+    const result = await fetchPrice(group.symbol, group.market);
+    if (result === null) continue;
 
+    const price = result.price;
     const prevData = lastPrices[group.symbol];
     const currency = (group.market === 'nse' || group.market === 'bse') ? '₹' : '$';
     const displaySymbol = group.symbol.replace('USDT', '').replace('.NS', ' (NSE)').replace('.BO', ' (BSE)');
@@ -273,13 +277,10 @@ app.post('/api/prices/bulk', async (req, res) => {
     const batch = symbols.slice(i, i + batchSize);
     const promises = batch.map(async (s) => {
       try {
-        const price = await fetchPrice(s.symbol, s.market);
-        if (price !== null) {
-          // Get previous close for change calculation
-          const prev = lastPrices[s.symbol];
-          const change = prev ? ((price - prev.price) / prev.price * 100) : 0;
-          results[s.symbol] = { price, change, time: Date.now() };
-          lastPrices[s.symbol] = { price, time: Date.now() };
+        const result = await fetchPrice(s.symbol, s.market);
+        if (result !== null) {
+          results[s.symbol] = { price: result.price, change: result.change, time: Date.now() };
+          lastPrices[s.symbol] = { price: result.price, time: Date.now() };
         }
       } catch (e) { /* skip */ }
     });
@@ -295,10 +296,10 @@ app.post('/api/prices/bulk', async (req, res) => {
 app.get('/api/price/:symbol', async (req, res) => {
   const { symbol } = req.params;
   const market = req.query.market || (symbol.includes('.NS') ? 'nse' : symbol.includes('.BO') ? 'bse' : symbol.endsWith('USDT') ? 'crypto' : 'stocks');
-  const price = await fetchPrice(symbol, market);
-  if (price !== null) {
-    lastPrices[symbol] = { price, time: Date.now() };
-    res.json({ symbol, price, time: Date.now() });
+  const result = await fetchPrice(symbol, market);
+  if (result !== null) {
+    lastPrices[symbol] = { price: result.price, time: Date.now() };
+    res.json({ symbol, price: result.price, change: result.change, time: Date.now() });
   } else {
     res.status(404).json({ error: 'Could not fetch price' });
   }
