@@ -1270,11 +1270,16 @@ const TVChart = {
         borderColor: isDark ? '#2d3348' : '#e0e0e0',
         timeVisible: true,
         secondsVisible: false,
-        tickMarkFormatter: (time) => {
+        tickMarkFormatter: (time, tickMarkType) => {
           if (typeof time === 'object') {
-            return time.day + '/' + time.month;
+            return time.day + '/' + time.month + '/' + time.year;
           }
           const d = new Date(time * 1000);
+          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          // tickMarkType: 0=Year, 1=Month, 2=DayOfMonth, 3=Time, 4=TimeWithSeconds
+          if (tickMarkType === 0) return String(d.getUTCFullYear());
+          if (tickMarkType === 1) return months[d.getUTCMonth()] + ' \'' + String(d.getUTCFullYear()).slice(2);
+          if (tickMarkType === 2) return d.getUTCDate() + ' ' + months[d.getUTCMonth()];
           return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
         },
       },
@@ -1290,7 +1295,17 @@ const TVChart = {
             return time.day + '/' + time.month + '/' + time.year;
           }
           const d = new Date(time * 1000);
-          return d.getUTCDate() + '/' + (d.getUTCMonth()+1) + ' ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0') + ' IST';
+          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          const day = d.getUTCDate();
+          const month = months[d.getUTCMonth()];
+          const year = d.getUTCFullYear();
+          const hrs = String(d.getUTCHours()).padStart(2,'0');
+          const mins = String(d.getUTCMinutes()).padStart(2,'0');
+          // Show time for intraday candles (non-midnight timestamps)
+          if (d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0) {
+            return day + ' ' + month + ' ' + year + '  ' + hrs + ':' + mins + ' IST';
+          }
+          return day + ' ' + month + ' ' + year;
         },
       }
     });
@@ -1354,12 +1369,12 @@ const TVChart = {
       '1h':  { range: '2y',  interval: '60m' },
       '2h':  { range: '2y',  interval: '60m' },
       '4h':  { range: '2y',  interval: '60m' },
-      '1D':  { range: 'max', interval: '1d' },
-      '3D':  { range: 'max', interval: '1d' },
+      '1D':  { range: '2y',  interval: '1d' },
+      '3D':  { range: '5y',  interval: '1d' },
       '1W':  { range: 'max', interval: '1wk' },
       '1M':  { range: 'max', interval: '1mo' },
     };
-    return map[timeframe] || { range: 'max', interval: '1d' };
+    return map[timeframe] || { range: '2y', interval: '1d' };
   },
 
   _isIntraday(interval) {
@@ -1377,20 +1392,15 @@ const TVChart = {
 
     for (let i = 0; i < ts.length; i++) {
       if (q.open?.[i] != null && q.close?.[i] != null && q.high?.[i] != null && q.low?.[i] != null) {
-        let time;
-        if (intraday) {
-          // Add IST offset so chart displays IST times
-          time = ts[i] + this.IST_OFFSET;
-        } else {
-          // Daily+: use business day format (no timezone issues)
-          const d = new Date(ts[i] * 1000);
-          time = { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
-        }
+        // Unix timestamps for all intervals (Lightweight Charts displays as UTC)
+        // Intraday: shift by IST offset so x-axis reads IST
+        // Daily+: no shift needed (dates are date-level, no timezone concern)
+        const time = intraday ? ts[i] + this.IST_OFFSET : ts[i];
 
         candles.push({
           time,
           open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
-          _rawTime: ts[i] // Keep original timestamp for scroll-to-load calculations
+          _rawTime: ts[i] // Original UTC timestamp for scroll-to-load calculations
         });
         volumes.push({
           time,
@@ -1443,13 +1453,12 @@ const TVChart = {
   },
 
   _mergeData(existing, existingVol, newer, newerVol) {
-    // Build set of existing raw timestamps for dedup
-    const existingTimes = new Set(existing.map(c => JSON.stringify(c.time)));
+    // Deduplicate by original UTC timestamp
+    const existingTimes = new Set(existing.map(c => c._rawTime));
     const uniqueCandles = [];
     const uniqueVolumes = [];
     for (let i = 0; i < newer.length; i++) {
-      const key = JSON.stringify(newer[i].time);
-      if (!existingTimes.has(key)) {
+      if (!existingTimes.has(newer[i]._rawTime)) {
         uniqueCandles.push(newer[i]);
         uniqueVolumes.push(newerVol[i]);
       }
@@ -1457,13 +1466,9 @@ const TVChart = {
     const merged = [...uniqueCandles, ...existing];
     const mergedVol = [...uniqueVolumes, ...existingVol];
 
-    // Sort by time (handle both number and {year,month,day} formats)
+    // Sort by original UTC timestamp
     const indices = merged.map((_, i) => i);
-    indices.sort((a, b) => {
-      const ta = merged[a]._rawTime || 0;
-      const tb = merged[b]._rawTime || 0;
-      return ta - tb;
-    });
+    indices.sort((a, b) => merged[a]._rawTime - merged[b]._rawTime);
     return {
       candles: indices.map(i => merged[i]),
       volumes: indices.map(i => mergedVol[i]),
