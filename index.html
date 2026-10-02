@@ -1256,7 +1256,12 @@ const TVChart = {
 
   async _fetchYahooData(symbol, timeframe) {
     const { range, interval } = this._getTimeframeParams(timeframe);
-    const proxyPath = `/api/yahoo/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+    // Convert crypto symbols to Yahoo format: BTCUSDT → BTC-USD
+    let yahooSymbol = symbol;
+    if (AppState.currentMarket === 'crypto') {
+      yahooSymbol = symbol.replace('USDT', '-USD').replace('BUSD', '-USD').replace('USDC', '-USD');
+    }
+    const proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}`;
 
     let url;
     const serverUrl = AppState.settings.alertServerUrl;

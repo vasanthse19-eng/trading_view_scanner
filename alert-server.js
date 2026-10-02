@@ -127,11 +127,31 @@ async function detectChatId() {
 async function fetchPrice(symbol, market) {
   try {
     if (market === 'crypto') {
-      // Binance REST API — get 24h ticker for price + change
-      const pair = symbol.toUpperCase();
-      const resp = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`);
+      // Try Binance first
+      try {
+        const pair = symbol.toUpperCase();
+        const resp = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`, {
+          signal: AbortSignal.timeout(5000)
+        });
+        const data = await resp.json();
+        if (data.lastPrice && !data.code) {
+          return { price: parseFloat(data.lastPrice), change: parseFloat(data.priceChangePercent) || 0 };
+        }
+      } catch(e) { /* Binance blocked/failed, fall through to Yahoo */ }
+
+      // Fallback: Yahoo Finance for crypto (BTCUSDT → BTC-USD)
+      const yahooSymbol = symbol.replace('USDT', '-USD').replace('BUSD', '-USD').replace('USDC', '-USD');
+      const resp = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?range=1d&interval=1m`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
       const data = await resp.json();
-      return { price: parseFloat(data.lastPrice), change: parseFloat(data.priceChangePercent) || 0 };
+      const meta = data.chart?.result?.[0]?.meta;
+      if (meta && meta.regularMarketPrice) {
+        const price = meta.regularMarketPrice;
+        const prevClose = meta.previousClose || meta.chartPreviousClose || price;
+        const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+        return { price, change };
+      }
     } else {
       // Yahoo Finance for stocks, NSE, BSE
       const resp = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`, {
