@@ -1337,6 +1337,7 @@ const TVChart = {
         borderColor: isDark ? '#2d3348' : '#e0e0e0',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 30,
         tickMarkFormatter: (time, tickMarkType) => {
           if (typeof time === 'object') {
             return time.day + '/' + time.month + '/' + time.year;
@@ -2933,18 +2934,15 @@ const App = {
 
 // ==================== CHART DRAWINGS ====================
 const ChartDrawings = {
-  _tool: null, // 'trendline', 'hline', 'ray', 'rect'
-  _drawings: [],
-  _activePoint: null, // first click coords for 2-point tools
+  _tool: null,        // 'trendline', 'hline', 'ray', 'rect'
+  _drawings: [],      // stored as { type, p1:{logical,price}, p2:{logical,price}, color }
+  _activePoint: null,
   _canvas: null,
   _ctx: null,
   _hoveredIdx: -1,
-  _dragIdx: -1,
-  _dragPoint: null, // 'p1' or 'p2'
   _pendingPreview: null,
 
   init() {
-    // Create overlay canvas
     const container = document.getElementById('tv-widget-container');
     if (!container) return;
 
@@ -2952,7 +2950,6 @@ const ChartDrawings = {
     this._canvas.id = 'drawing-canvas';
     this._canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:30;pointer-events:none;';
     container.appendChild(this._canvas);
-
     this._ctx = this._canvas.getContext('2d');
     this._resizeCanvas();
 
@@ -2960,11 +2957,7 @@ const ChartDrawings = {
     document.querySelectorAll('.draw-btn[data-tool]').forEach(btn => {
       btn.addEventListener('click', () => {
         const tool = btn.dataset.tool;
-        if (this._tool === tool) {
-          this.deactivate();
-        } else {
-          this.activate(tool);
-        }
+        this._tool === tool ? this.deactivate() : this.activate(tool);
       });
     });
 
@@ -2972,7 +2965,7 @@ const ChartDrawings = {
     const delBtn = document.getElementById('btn-delete-drawings');
     if (delBtn) delBtn.addEventListener('click', () => this.clearAll());
 
-    // Keyboard: Escape to cancel, Delete to remove hovered
+    // Keyboard
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.deactivate();
       if (e.key === 'Delete' && this._hoveredIdx >= 0) {
@@ -2983,20 +2976,13 @@ const ChartDrawings = {
       }
     });
 
-    // Mouse events on chart container (need pointer-events on container, not canvas)
+    // Mouse events
     container.addEventListener('mousedown', (e) => this._onMouseDown(e));
     container.addEventListener('mousemove', (e) => this._onMouseMove(e));
-    container.addEventListener('mouseup', (e) => this._onMouseUp(e));
 
     // Resize observer
     new ResizeObserver(() => { this._resizeCanvas(); this.render(); }).observe(container);
 
-    // Re-render on chart scroll/zoom
-    if (TVChart.chart) {
-      TVChart.chart.timeScale().subscribeVisibleTimeRangeChange(() => this.render());
-    }
-
-    // Restore saved drawings
     this._loadDrawings();
   },
 
@@ -3024,46 +3010,54 @@ const ChartDrawings = {
     this._activePoint = null;
     this._pendingPreview = null;
     document.querySelectorAll('.draw-btn[data-tool]').forEach(b => b.classList.remove('active'));
-    document.getElementById('tv-widget-container').classList.remove('drawing-mode');
+    const container = document.getElementById('tv-widget-container');
+    if (container) container.classList.remove('drawing-mode');
     if (this._canvas) this._canvas.style.pointerEvents = 'none';
     this.render();
   },
 
-  _getChartCoords(e) {
+  // Convert pixel coords to { logical, price } — works in future space
+  _pixelToChart(e) {
     if (!TVChart.chart || !TVChart.candleSeries) return null;
     const rect = this._canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const timeScale = TVChart.chart.timeScale();
-    const priceScale = TVChart.candleSeries;
 
-    const time = timeScale.coordinateToTime(x);
-    const price = priceScale.coordinateToPrice(y);
-    if (time == null || price == null) return null;
-    return { time, price, x, y };
+    const logical = TVChart.chart.timeScale().coordinateToLogical(x);
+    const price = TVChart.candleSeries.coordinateToPrice(y);
+    if (logical == null || price == null) return null;
+    return { logical, price, x, y };
+  },
+
+  // Convert { logical, price } to pixel { x, y }
+  _chartToPixel(logical, price) {
+    if (!TVChart.chart || !TVChart.candleSeries) return null;
+    const x = TVChart.chart.timeScale().logicalToCoordinate(logical);
+    const y = TVChart.candleSeries.priceToCoordinate(price);
+    if (x == null || y == null) return null;
+    return { x, y };
   },
 
   _onMouseDown(e) {
     if (!this._tool) return;
-    const coords = this._getChartCoords(e);
-    if (!coords) return;
+    const pt = this._pixelToChart(e);
+    if (!pt) return;
 
     if (this._tool === 'hline') {
-      // Single click — horizontal line
-      this._drawings.push({ type: 'hline', price: coords.price, color: '#2962ff' });
+      this._drawings.push({ type: 'hline', price: pt.price, color: '#2962ff' });
       this._saveDrawings();
       this.render();
       return;
     }
 
-    // Two-point tools: trendline, ray, rect
+    // Two-point tools
     if (!this._activePoint) {
-      this._activePoint = { time: coords.time, price: coords.price };
+      this._activePoint = { logical: pt.logical, price: pt.price };
     } else {
       this._drawings.push({
         type: this._tool,
-        p1: { time: this._activePoint.time, price: this._activePoint.price },
-        p2: { time: coords.time, price: coords.price },
+        p1: { logical: this._activePoint.logical, price: this._activePoint.price },
+        p2: { logical: pt.logical, price: pt.price },
         color: this._tool === 'rect' ? 'rgba(41,98,255,0.2)' : '#2962ff'
       });
       this._activePoint = null;
@@ -3074,20 +3068,24 @@ const ChartDrawings = {
   },
 
   _onMouseMove(e) {
-    const coords = this._getChartCoords(e);
-    if (!coords) return;
+    const rect = this._canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
 
-    // Preview line while drawing
+    // Preview while drawing
     if (this._tool && this._activePoint) {
-      this._pendingPreview = { time: coords.time, price: coords.price };
-      this.render();
+      const pt = this._pixelToChart(e);
+      if (pt) {
+        this._pendingPreview = { logical: pt.logical, price: pt.price };
+        this.render();
+      }
       return;
     }
 
-    // Hover detection (when not drawing)
+    // Hover detection when not drawing
     if (!this._tool) {
       const prevHovered = this._hoveredIdx;
-      this._hoveredIdx = this._hitTest(coords.x, coords.y);
+      this._hoveredIdx = this._hitTest(mx, my);
       if (prevHovered !== this._hoveredIdx) {
         this._canvas.style.pointerEvents = this._hoveredIdx >= 0 ? 'auto' : 'none';
         this._canvas.style.cursor = this._hoveredIdx >= 0 ? 'pointer' : 'default';
@@ -3096,14 +3094,10 @@ const ChartDrawings = {
     }
   },
 
-  _onMouseUp(e) {
-    this._dragIdx = -1;
-    this._dragPoint = null;
-  },
-
   _hitTest(x, y) {
     if (!TVChart.chart || !TVChart.candleSeries) return -1;
-    const threshold = 6;
+    const threshold = 8;
+    const w = this._canvas.width;
 
     for (let i = this._drawings.length - 1; i >= 0; i--) {
       const d = this._drawings[i];
@@ -3111,35 +3105,37 @@ const ChartDrawings = {
         const py = TVChart.candleSeries.priceToCoordinate(d.price);
         if (py != null && Math.abs(y - py) < threshold) return i;
       } else {
-        const coords = this._getLineCoords(d);
-        if (!coords) continue;
-        const dist = this._pointToLineDist(x, y, coords.x1, coords.y1, coords.x2, coords.y2, d.type === 'trendline');
-        if (dist < threshold) return i;
+        const c1 = this._chartToPixel(d.p1.logical, d.p1.price);
+        const c2 = this._chartToPixel(d.p2.logical, d.p2.price);
+        if (!c1 || !c2) continue;
+
+        if (d.type === 'rect') {
+          const rx = Math.min(c1.x, c2.x), ry = Math.min(c1.y, c2.y);
+          const rw = Math.abs(c2.x - c1.x), rh = Math.abs(c2.y - c1.y);
+          if (x >= rx - threshold && x <= rx + rw + threshold && y >= ry - threshold && y <= ry + rh + threshold) {
+            // Near edges
+            if (Math.abs(x - rx) < threshold || Math.abs(x - rx - rw) < threshold ||
+                Math.abs(y - ry) < threshold || Math.abs(y - ry - rh) < threshold) return i;
+          }
+        } else {
+          // Trendline: segment only. Ray: extend in p1→p2 direction.
+          const isSegment = d.type === 'trendline';
+          const dist = this._pointToSegDist(x, y, c1.x, c1.y, c2.x, c2.y, isSegment);
+          if (dist < threshold) return i;
+        }
       }
     }
     return -1;
   },
 
-  _getLineCoords(d) {
-    const ts = TVChart.chart.timeScale();
-    const ps = TVChart.candleSeries;
-    const x1 = ts.timeToCoordinate(d.p1.time);
-    const y1 = ps.priceToCoordinate(d.p1.price);
-    const x2 = ts.timeToCoordinate(d.p2.time);
-    const y2 = ps.priceToCoordinate(d.p2.price);
-    if (x1 == null || y1 == null || x2 == null || y2 == null) return null;
-    return { x1, y1, x2, y2 };
-  },
-
-  _pointToLineDist(px, py, x1, y1, x2, y2, isSegment) {
+  _pointToSegDist(px, py, x1, y1, x2, y2, isSegment) {
     const dx = x2 - x1, dy = y2 - y1;
     const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
     let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
     if (isSegment) t = Math.max(0, Math.min(1, t));
-    else t = Math.max(0, t); // ray: clamp to [0, inf)
-    const projX = x1 + t * dx, projY = y1 + t * dy;
-    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+    else t = Math.max(0, t); // ray: only forward
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   },
 
   render() {
@@ -3147,10 +3143,7 @@ const ChartDrawings = {
     const ctx = this._ctx;
     const w = this._canvas.width, h = this._canvas.height;
     ctx.clearRect(0, 0, w, h);
-
     if (!TVChart.chart || !TVChart.candleSeries) return;
-    const ts = TVChart.chart.timeScale();
-    const ps = TVChart.candleSeries;
 
     this._drawings.forEach((d, idx) => {
       const isHovered = idx === this._hoveredIdx;
@@ -3159,44 +3152,47 @@ const ChartDrawings = {
       ctx.setLineDash([]);
 
       if (d.type === 'hline') {
-        const py = ps.priceToCoordinate(d.price);
+        const py = TVChart.candleSeries.priceToCoordinate(d.price);
         if (py == null) return;
         ctx.setLineDash([6, 3]);
         ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
-        // Price label
         ctx.fillStyle = isHovered ? '#ff9800' : '#2962ff';
         ctx.font = '11px sans-serif';
         ctx.fillText(d.price.toFixed(2), 4, py - 4);
-      } else if (d.type === 'rect') {
-        const coords = this._getLineCoords(d);
-        if (!coords) return;
+        return;
+      }
+
+      const c1 = this._chartToPixel(d.p1.logical, d.p1.price);
+      const c2 = this._chartToPixel(d.p2.logical, d.p2.price);
+      if (!c1 || !c2) return;
+
+      if (d.type === 'rect') {
+        const rx = Math.min(c1.x, c2.x), ry = Math.min(c1.y, c2.y);
+        const rw = Math.abs(c2.x - c1.x), rh = Math.abs(c2.y - c1.y);
         ctx.fillStyle = isHovered ? 'rgba(255,152,0,0.15)' : (d.color || 'rgba(41,98,255,0.2)');
-        const rx = Math.min(coords.x1, coords.x2), ry = Math.min(coords.y1, coords.y2);
-        const rw = Math.abs(coords.x2 - coords.x1), rh = Math.abs(coords.y2 - coords.y1);
         ctx.fillRect(rx, ry, rw, rh);
         ctx.strokeStyle = isHovered ? '#ff9800' : '#2962ff';
         ctx.strokeRect(rx, ry, rw, rh);
       } else {
-        // trendline or ray
-        const coords = this._getLineCoords(d);
-        if (!coords) return;
+        // Trendline or Ray
         ctx.beginPath();
-        ctx.moveTo(coords.x1, coords.y1);
+        ctx.moveTo(c1.x, c1.y);
         if (d.type === 'ray') {
-          // Extend to canvas edge
-          const dx = coords.x2 - coords.x1, dy = coords.y2 - coords.y1;
-          const len = Math.sqrt(dx * dx + dy * dy);
+          // Extend far beyond p2
+          const dx = c2.x - c1.x, dy = c2.y - c1.y;
+          const len = Math.hypot(dx, dy);
           if (len > 0) {
-            const scale = Math.max(w, h) * 2 / len;
-            ctx.lineTo(coords.x1 + dx * scale, coords.y1 + dy * scale);
+            const scale = Math.max(w, h) * 3 / len;
+            ctx.lineTo(c1.x + dx * scale, c1.y + dy * scale);
           }
         } else {
-          ctx.lineTo(coords.x2, coords.y2);
+          ctx.lineTo(c2.x, c2.y);
         }
         ctx.stroke();
-        // Draw anchor dots
+
+        // Anchor dots on hover
         if (isHovered) {
-          [{ x: coords.x1, y: coords.y1 }, { x: coords.x2, y: coords.y2 }].forEach(p => {
+          [c1, c2].forEach(p => {
             ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
             ctx.fillStyle = '#ff9800'; ctx.fill();
           });
@@ -3204,25 +3200,26 @@ const ChartDrawings = {
       }
     });
 
-    // Preview line while drawing
+    // Preview while drawing
     if (this._activePoint && this._pendingPreview) {
-      const x1 = ts.timeToCoordinate(this._activePoint.time);
-      const y1 = ps.priceToCoordinate(this._activePoint.price);
-      const x2 = ts.timeToCoordinate(this._pendingPreview.time);
-      const y2 = ps.priceToCoordinate(this._pendingPreview.price);
-      if (x1 != null && y1 != null && x2 != null && y2 != null) {
+      const c1 = this._chartToPixel(this._activePoint.logical, this._activePoint.price);
+      const c2 = this._chartToPixel(this._pendingPreview.logical, this._pendingPreview.price);
+      if (c1 && c2) {
         ctx.strokeStyle = 'rgba(41,98,255,0.6)';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
         if (this._tool === 'rect') {
-          const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
-          ctx.strokeRect(rx, ry, Math.abs(x2 - x1), Math.abs(y2 - y1));
+          const rx = Math.min(c1.x, c2.x), ry = Math.min(c1.y, c2.y);
+          ctx.strokeRect(rx, ry, Math.abs(c2.x - c1.x), Math.abs(c2.y - c1.y));
         } else {
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(x2, y2);
+          ctx.moveTo(c1.x, c1.y);
+          ctx.lineTo(c2.x, c2.y);
           ctx.stroke();
         }
+        // Show first anchor dot
+        ctx.fillStyle = '#2962ff';
+        ctx.beginPath(); ctx.arc(c1.x, c1.y, 4, 0, Math.PI * 2); ctx.fill();
       }
     }
   },
