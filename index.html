@@ -398,6 +398,23 @@
     }
     @keyframes clSpin { to { transform: rotate(360deg); } }
     .chart-loading-text { margin-top: 12px; color: #787b86; font-size: 13px; }
+
+    /* Scroll-to-load indicator */
+    #scroll-load-indicator {
+      position: absolute; top: 8px; left: 8px; z-index: 40;
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(11,14,17,0.85); border-radius: 4px;
+      padding: 4px 10px; font-size: 11px; color: #787b86;
+      transition: opacity 0.2s;
+    }
+    #scroll-load-indicator.hidden { opacity: 0; pointer-events: none; }
+    .scroll-load-spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top: 2px solid #2962ff;
+      border-radius: 50%;
+      animation: clSpin 0.8s linear infinite;
+    }
     /* Error overlay */
     .chart-error-overlay {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -960,37 +977,6 @@ const DemoData = {
 const API = {
   // Binance interval mapping
   binanceIntervals: { '1m':'1m', '5m':'5m', '15m':'15m', '1h':'1h', '2h':'2h', '4h':'4h', '1D':'1d', '3D':'3d', '1W':'1w', '1M':'1M' },
-  // Yahoo range/interval mapping
-  yahooMap: {
-    '1m':  { range: '1d',  interval: '1m' },
-    '5m':  { range: '60d', interval: '5m' },
-    '15m': { range: '60d', interval: '15m' },
-    '1h':  { range: '2y',  interval: '60m' },
-    '2h':  { range: '2y',  interval: '60m', aggregate: 2 },
-    '4h':  { range: '2y',  interval: '60m', aggregate: 4 },
-    '1D':  { range: 'max', interval: '1d' },
-    '3D':  { range: 'max', interval: '1d',  aggregate: 3 },
-    '1W':  { range: 'max', interval: '1wk' },
-    '1M':  { range: 'max', interval: '1mo' }
-  },
-
-  aggregateCandles(candles, factor) {
-    if (!factor || factor <= 1) return candles;
-    const result = [];
-    for (let i = 0; i < candles.length; i += factor) {
-      const chunk = candles.slice(i, i + factor);
-      if (chunk.length === 0) continue;
-      result.push({
-        time: chunk[0].time,
-        open: chunk[0].open,
-        high: Math.max(...chunk.map(c => c.high)),
-        low: Math.min(...chunk.map(c => c.low)),
-        close: chunk[chunk.length - 1].close,
-        volume: chunk.reduce((sum, c) => sum + (c.volume || 0), 0)
-      });
-    }
-    return result;
-  },
   finnhubRes: { '1m':'1', '5m':'5', '15m':'15', '1h':'60', '2h':'60', '4h':'D', '1D':'D', '3D':'D', '1W':'W', '1M':'M' },
 
   // --- Binance REST ---
@@ -1229,6 +1215,38 @@ const TVChart = {
   candleSeries: null,
   volumeSeries: null,
   _loading: false,
+  // Scroll-to-load state
+  _allCandles: [],
+  _allVolumes: [],
+  _oldestTimestamp: null,
+  _newestTimestamp: null,
+  _noMoreData: false,
+  _fetchingMore: false,
+  _currentSymbol: null,
+  _currentTimeframe: null,
+  _scrollCache: {},
+
+  IST_OFFSET: 19800, // UTC+5:30 in seconds
+
+  _maxRangeSeconds: {
+    '1m':  7 * 86400,
+    '5m':  60 * 86400,
+    '15m': 60 * 86400,
+    '60m': 730 * 86400,
+    '1d':  50 * 365 * 86400,
+    '1wk': 50 * 365 * 86400,
+    '1mo': 50 * 365 * 86400,
+  },
+
+  _chunkSizes: {
+    '1m':  2 * 86400,
+    '5m':  15 * 86400,
+    '15m': 20 * 86400,
+    '60m': 90 * 86400,
+    '1d':  2 * 365 * 86400,
+    '1wk': 5 * 365 * 86400,
+    '1mo': 10 * 365 * 86400,
+  },
 
   init() {
     const container = document.getElementById('tv-widget-container');
@@ -1252,6 +1270,13 @@ const TVChart = {
         borderColor: isDark ? '#2d3348' : '#e0e0e0',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time) => {
+          if (typeof time === 'object') {
+            return time.day + '/' + time.month;
+          }
+          const d = new Date(time * 1000);
+          return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
+        },
       },
       localization: {
         priceFormatter: (price) => {
@@ -1259,7 +1284,14 @@ const TVChart = {
           const curr = (m === 'nse' || m === 'bse') ? '₹' : '$';
           if (Math.abs(price) >= 1) return curr + price.toFixed(2);
           return curr + price.toFixed(6);
-        }
+        },
+        timeFormatter: (time) => {
+          if (typeof time === 'object') {
+            return time.day + '/' + time.month + '/' + time.year;
+          }
+          const d = new Date(time * 1000);
+          return d.getUTCDate() + '/' + (d.getUTCMonth()+1) + ' ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0') + ' IST';
+        },
       }
     });
 
@@ -1285,32 +1317,108 @@ const TVChart = {
     };
     window.addEventListener('resize', this._resizeHandler);
     new ResizeObserver(this._resizeHandler).observe(container);
+
+    // Crosshair OHLC: update info bar on hover
+    this.chart.subscribeCrosshairMove((param) => {
+      if (!param.time || !param.seriesData) {
+        if (this._allCandles.length > 0) {
+          const last = this._allCandles[this._allCandles.length - 1];
+          UIController.updateChartInfoBar(last);
+        }
+        return;
+      }
+      const candleData = param.seriesData.get(this.candleSeries);
+      if (candleData && candleData.open != null) {
+        UIController.updateChartInfoBar({
+          open: candleData.open, high: candleData.high,
+          low: candleData.low, close: candleData.close
+        });
+      }
+    });
+
+    // Scroll-to-load: detect when user scrolls near left edge
+    this._onVisibleRangeChange = debounce((logicalRange) => {
+      if (!logicalRange) return;
+      if (logicalRange.from <= 10) {
+        this._loadMoreHistory();
+      }
+    }, 300);
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(this._onVisibleRangeChange);
   },
 
   _getTimeframeParams(timeframe) {
     const map = {
-      '1m':  { range: '1d',  interval: '1m' },
-      '5m':  { range: '5d',  interval: '5m' },
-      '15m': { range: '10d', interval: '15m' },
-      '1h':  { range: '1mo', interval: '60m' },
-      '2h':  { range: '3mo', interval: '60m' },  // Yahoo doesn't have 2h, use 1h
-      '4h':  { range: '6mo', interval: '60m' },  // Yahoo doesn't have 4h, use 1h
-      '1D':  { range: '2y',  interval: '1d' },
-      '3D':  { range: '5y',  interval: '1d' },   // Use daily, user sees bigger range
-      '1W':  { range: '10y', interval: '1wk' },
+      '1m':  { range: '7d',  interval: '1m' },
+      '5m':  { range: '60d', interval: '5m' },
+      '15m': { range: '60d', interval: '15m' },
+      '1h':  { range: '2y',  interval: '60m' },
+      '2h':  { range: '2y',  interval: '60m' },
+      '4h':  { range: '2y',  interval: '60m' },
+      '1D':  { range: 'max', interval: '1d' },
+      '3D':  { range: 'max', interval: '1d' },
+      '1W':  { range: 'max', interval: '1wk' },
       '1M':  { range: 'max', interval: '1mo' },
     };
-    return map[timeframe] || { range: '2y', interval: '1d' };
+    return map[timeframe] || { range: 'max', interval: '1d' };
   },
 
-  async _fetchYahooData(symbol, timeframe) {
-    const { range, interval } = this._getTimeframeParams(timeframe);
-    // Convert crypto symbols to Yahoo format: BTCUSDT → BTC-USD
+  _isIntraday(interval) {
+    return ['1m','5m','15m','60m'].includes(interval);
+  },
+
+  _parseCandles(result, interval) {
+    const ts = result.timestamp;
+    const q = result.indicators?.quote?.[0];
+    if (!ts || !q) return { candles: [], volumes: [] };
+
+    const intraday = this._isIntraday(interval);
+    const candles = [];
+    const volumes = [];
+
+    for (let i = 0; i < ts.length; i++) {
+      if (q.open?.[i] != null && q.close?.[i] != null && q.high?.[i] != null && q.low?.[i] != null) {
+        let time;
+        if (intraday) {
+          // Add IST offset so chart displays IST times
+          time = ts[i] + this.IST_OFFSET;
+        } else {
+          // Daily+: use business day format (no timezone issues)
+          const d = new Date(ts[i] * 1000);
+          time = { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+        }
+
+        candles.push({
+          time,
+          open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
+          _rawTime: ts[i] // Keep original timestamp for scroll-to-load calculations
+        });
+        volumes.push({
+          time,
+          value: q.volume?.[i] || 0,
+          color: q.close[i] >= q.open[i] ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+        });
+      }
+    }
+    return { candles, volumes };
+  },
+
+  async _fetchYahooData(symbol, timeframe, { period1, period2 } = {}) {
+    const params = this._getTimeframeParams(timeframe);
+    const interval = params.interval;
+
+    // Convert crypto symbols to Yahoo format
     let yahooSymbol = symbol;
     if (AppState.currentMarket === 'crypto') {
       yahooSymbol = symbol.replace('USDT', '-USD').replace('BUSD', '-USD').replace('USDC', '-USD');
     }
-    const proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}`;
+
+    let proxyPath;
+    if (period1) {
+      const p2 = period2 || Math.floor(Date.now() / 1000);
+      proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?period1=${period1}&period2=${p2}&interval=${interval}`;
+    } else {
+      proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?range=${params.range}&interval=${interval}`;
+    }
 
     let url;
     const serverUrl = AppState.settings.alertServerUrl;
@@ -1319,8 +1427,7 @@ const TVChart = {
     } else if (window.location.protocol.startsWith('http')) {
       url = proxyPath;
     } else {
-      // Fallback to allorigins
-      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=${params.range}&interval=${interval}`;
       url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
     }
 
@@ -1331,42 +1438,140 @@ const TVChart = {
     const result = data.chart?.result?.[0];
     if (!result || !result.timestamp) throw new Error('No chart data');
 
-    const ts = result.timestamp;
-    const q = result.indicators?.quote?.[0];
-    if (!q) throw new Error('No quote data');
+    const parsed = this._parseCandles(result, interval);
+    return { candles: parsed.candles, volumes: parsed.volumes, meta: result.meta };
+  },
 
-    const candles = [];
-    const volumes = [];
-    for (let i = 0; i < ts.length; i++) {
-      if (q.open?.[i] != null && q.close?.[i] != null && q.high?.[i] != null && q.low?.[i] != null) {
-        // Lightweight Charts expects time as UTC timestamp in seconds for intraday,
-        // or YYYY-MM-DD string for daily+
-        const isIntraday = ['1m','5m','15m','60m','2m'].includes(interval);
-        const time = isIntraday ? ts[i] : ts[i]; // Both use Unix timestamp
-
-        candles.push({
-          time: ts[i],
-          open: q.open[i],
-          high: q.high[i],
-          low: q.low[i],
-          close: q.close[i],
-        });
-        volumes.push({
-          time: ts[i],
-          value: q.volume?.[i] || 0,
-          color: q.close[i] >= q.open[i] ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
-        });
+  _mergeData(existing, existingVol, newer, newerVol) {
+    // Build set of existing raw timestamps for dedup
+    const existingTimes = new Set(existing.map(c => JSON.stringify(c.time)));
+    const uniqueCandles = [];
+    const uniqueVolumes = [];
+    for (let i = 0; i < newer.length; i++) {
+      const key = JSON.stringify(newer[i].time);
+      if (!existingTimes.has(key)) {
+        uniqueCandles.push(newer[i]);
+        uniqueVolumes.push(newerVol[i]);
       }
     }
+    const merged = [...uniqueCandles, ...existing];
+    const mergedVol = [...uniqueVolumes, ...existingVol];
 
-    return { candles, volumes, meta: result.meta };
+    // Sort by time (handle both number and {year,month,day} formats)
+    const indices = merged.map((_, i) => i);
+    indices.sort((a, b) => {
+      const ta = merged[a]._rawTime || 0;
+      const tb = merged[b]._rawTime || 0;
+      return ta - tb;
+    });
+    return {
+      candles: indices.map(i => merged[i]),
+      volumes: indices.map(i => mergedVol[i]),
+    };
+  },
+
+  _showScrollLoadingIndicator() {
+    let el = document.getElementById('scroll-load-indicator');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'scroll-load-indicator';
+      el.innerHTML = '<div class="scroll-load-spinner"></div><span>Loading history...</span>';
+      document.getElementById('tv-widget-container').appendChild(el);
+    }
+    el.classList.remove('hidden');
+  },
+
+  _hideScrollLoadingIndicator() {
+    const el = document.getElementById('scroll-load-indicator');
+    if (el) el.classList.add('hidden');
+  },
+
+  async _loadMoreHistory() {
+    if (this._fetchingMore || this._noMoreData || this._loading) return;
+    if (!this._allCandles.length) return;
+    this._fetchingMore = true;
+
+    const symbol = this._currentSymbol;
+    const timeframe = this._currentTimeframe;
+    const params = this._getTimeframeParams(timeframe);
+    const interval = params.interval;
+
+    // Calculate fetch range
+    const oldestRaw = this._allCandles[0]._rawTime;
+    if (!oldestRaw) { this._fetchingMore = false; return; }
+
+    const chunkSize = this._chunkSizes[interval] || 90 * 86400;
+    let period1 = oldestRaw - chunkSize;
+    const period2 = oldestRaw;
+
+    // Clamp to Yahoo max range
+    const maxRange = this._maxRangeSeconds[interval] || 50 * 365 * 86400;
+    const now = Math.floor(Date.now() / 1000);
+    if (now - period1 > maxRange) {
+      period1 = now - maxRange;
+      this._noMoreData = true;
+    }
+    if (period1 >= period2) {
+      this._noMoreData = true;
+      this._fetchingMore = false;
+      return;
+    }
+
+    // Check scroll cache
+    const cacheKey = `${symbol}:${interval}:${period1}:${period2}`;
+    let olderData;
+
+    this._showScrollLoadingIndicator();
+
+    try {
+      if (this._scrollCache[cacheKey]) {
+        olderData = this._scrollCache[cacheKey];
+      } else {
+        olderData = await this._fetchYahooData(symbol, timeframe, { period1, period2 });
+        this._scrollCache[cacheKey] = olderData;
+      }
+
+      if (!olderData.candles.length) {
+        this._noMoreData = true;
+        this._fetchingMore = false;
+        this._hideScrollLoadingIndicator();
+        return;
+      }
+
+      // Preserve scroll position
+      const currentRange = this.chart.timeScale().getVisibleLogicalRange();
+      const prevCount = this._allCandles.length;
+
+      // Merge
+      const merged = this._mergeData(this._allCandles, this._allVolumes, olderData.candles, olderData.volumes);
+      this._allCandles = merged.candles;
+      this._allVolumes = merged.volumes;
+      this._oldestTimestamp = this._allCandles[0]._rawTime;
+
+      // Update chart
+      this.candleSeries.setData(this._allCandles);
+      this.volumeSeries.setData(this._allVolumes);
+
+      // Restore scroll position (shift by newly added candles)
+      if (currentRange) {
+        const addedCount = this._allCandles.length - prevCount;
+        this.chart.timeScale().setVisibleLogicalRange({
+          from: currentRange.from + addedCount,
+          to: currentRange.to + addedCount,
+        });
+      }
+    } catch(e) {
+      console.warn('Scroll-to-load error:', e.message);
+    } finally {
+      this._hideScrollLoadingIndicator();
+      this._fetchingMore = false;
+    }
   },
 
   async load(symbol, market, timeframe) {
     if (this._loading) return;
     this._loading = true;
 
-    // Show loading state
     const container = document.getElementById('tv-widget-container');
     let loadingEl = container.querySelector('.chart-loading-overlay');
     if (!loadingEl) {
@@ -1377,20 +1582,31 @@ const TVChart = {
     }
     loadingEl.classList.remove('hidden');
 
-    // Initialize chart if needed
     if (!this.chart) this.init();
 
     try {
-      const { candles, volumes, meta } = await this._fetchYahooData(symbol, timeframe || AppState.currentTimeframe);
+      const tf = timeframe || AppState.currentTimeframe;
+      const { candles, volumes, meta } = await this._fetchYahooData(symbol, tf);
 
       if (candles.length === 0) throw new Error('No candle data returned');
 
-      // Update series
+      // Store scroll state
+      this._currentSymbol = symbol;
+      this._currentTimeframe = tf;
+      this._allCandles = candles;
+      this._allVolumes = volumes;
+      this._oldestTimestamp = candles[0]._rawTime;
+      this._newestTimestamp = candles[candles.length - 1]._rawTime;
+      this._noMoreData = false;
+      this._fetchingMore = false;
+      this._scrollCache = {};
+
+      // Update chart
       this.candleSeries.setData(candles);
       this.volumeSeries.setData(volumes);
       this.chart.timeScale().fitContent();
 
-      // Update theme colors if needed
+      // Theme
       const isDark = AppState.currentTheme !== 'light';
       this.chart.applyOptions({
         layout: {
@@ -1403,28 +1619,21 @@ const TVChart = {
       const lastCandle = candles[candles.length - 1];
       if (lastCandle) {
         AppState.candles = candles;
-        UIController.updateChartInfoBar({
-          open: lastCandle.open, high: lastCandle.high,
-          low: lastCandle.low, close: lastCandle.close
-        });
+        UIController.updateChartInfoBar(lastCandle);
       }
 
-      // Update status
       StatusBar.update(true, `Yahoo Finance (${candles.length} candles)`);
-
-      // Hide loading
       loadingEl.classList.add('hidden');
 
     } catch(e) {
       console.error('Chart load error:', e);
-      loadingEl.innerHTML = `<div class="error-icon">⚠️</div><div class="error-text">${e.message}</div><button class="retry-btn" onclick="TVChart.load('${symbol}','${market}','${timeframe}')">Retry</button>`;
+      loadingEl.innerHTML = '<div class="error-icon">⚠️</div><div class="error-text">' + e.message + '</div><button class="retry-btn" onclick="TVChart.load(\'' + symbol + '\',\'' + market + '\',\'' + timeframe + '\')">Retry</button>';
       StatusBar.update(false, 'Error loading chart');
     } finally {
       this._loading = false;
     }
   },
 
-  // Called when theme changes
   applyTheme(themeName) {
     if (!this.chart) return;
     const isDark = themeName !== 'light';
@@ -1442,9 +1651,18 @@ const TVChart = {
 
   destroy() {
     if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
-    if (this.chart) { this.chart.remove(); this.chart = null; }
+    if (this.chart) {
+      if (this._onVisibleRangeChange) {
+        try { this.chart.timeScale().unsubscribeVisibleLogicalRangeChange(this._onVisibleRangeChange); } catch(e) {}
+      }
+      this.chart.remove();
+      this.chart = null;
+    }
     this.candleSeries = null;
     this.volumeSeries = null;
+    this._allCandles = [];
+    this._allVolumes = [];
+    this._scrollCache = {};
   }
 };
 

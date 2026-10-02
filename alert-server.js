@@ -432,8 +432,18 @@ app.post('/api/alerts/bulk', (req, res) => {
 app.get('/api/yahoo/chart/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
-    const { range = '1mo', interval = '60m' } = req.query;
-    const cacheKey = `${symbol}:${range}:${interval}`;
+    const { range = '1mo', interval = '60m', period1, period2 } = req.query;
+
+    // Build URL and cache key based on whether period1/period2 are provided
+    let yahooUrl, cacheKey;
+    if (period1) {
+      const p2 = period2 || Math.floor(Date.now() / 1000);
+      yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${p2}&interval=${interval}`;
+      cacheKey = `${symbol}:p${period1}-${p2}:${interval}`;
+    } else {
+      yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+      cacheKey = `${symbol}:${range}:${interval}`;
+    }
 
     // Serve from cache if available
     const cached = getFromCache(cacheKey, interval);
@@ -443,8 +453,7 @@ app.get('/api/yahoo/chart/:symbol', async (req, res) => {
       return res.json(cached);
     }
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
-    const response = await fetch(url, {
+    const response = await fetch(yahooUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
     const data = await response.json();
