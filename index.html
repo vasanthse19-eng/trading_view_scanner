@@ -488,7 +488,13 @@
 
     <!-- Chart Area -->
     <main id="chart-area" style="position:relative;flex:1;overflow:hidden;">
-      <div id="tv-widget-container" style="width:100%;height:100%;"></div>
+      <div class="chart-info-bar">
+        <span class="info-symbol" id="info-symbol">--</span>
+        <span class="info-price" id="info-price">--</span>
+        <span class="info-change" id="info-change">--</span>
+        <span class="info-ohlc" id="info-ohlc"></span>
+      </div>
+      <div id="tv-widget-container" style="width:100%;height:calc(100% - 28px);"></div>
     </main>
 
     <div class="panel-divider" id="divider-right"></div>
@@ -2118,22 +2124,28 @@ const UIController = {
   },
 
   updateChartInfoBar(candle) {
+    if (!candle) return;
     const sym = AppState.currentSymbol;
     const displaySym = sym.replace('USDT','').replace('.NS',' (NSE)').replace('.BO',' (BSE)');
     const curr = (AppState.currentMarket === 'nse' || AppState.currentMarket === 'bse') ? '₹' : '$';
-    document.getElementById('info-symbol').textContent = displaySym;
+    const symEl = document.getElementById('info-symbol');
+    if (symEl) symEl.textContent = displaySym;
     const priceEl = document.getElementById('info-price');
-    priceEl.textContent = curr + fmt(candle.close);
-    priceEl.className = `info-price ${candle.close >= candle.open ? 'price-up' : 'price-down'}`;
+    if (priceEl) {
+      priceEl.textContent = curr + fmt(candle.close);
+      priceEl.className = `info-price ${candle.close >= candle.open ? 'price-up' : 'price-down'}`;
+    }
     if (AppState.candles.length > 1) {
       const first = AppState.candles[0].close;
       const pct = ((candle.close - first) / first * 100).toFixed(2);
       const changeEl = document.getElementById('info-change');
-      changeEl.textContent = (pct >= 0 ? '+' : '') + pct + '%';
-      changeEl.className = `info-change ${pct >= 0 ? 'price-up' : 'price-down'}`;
+      if (changeEl) {
+        changeEl.textContent = (pct >= 0 ? '+' : '') + pct + '%';
+        changeEl.className = `info-change ${pct >= 0 ? 'price-up' : 'price-down'}`;
+      }
     }
     const ohlcEl = document.getElementById('info-ohlc');
-    ohlcEl.innerHTML = `<span>O</span><b>${fmt(candle.open)}</b><span>H</span><b>${fmt(candle.high)}</b><span>L</span><b>${fmt(candle.low)}</b><span>C</span><b>${fmt(candle.close)}</b>`;
+    if (ohlcEl) ohlcEl.innerHTML = `<span>O</span><b>${fmt(candle.open)}</b><span>H</span><b>${fmt(candle.high)}</b><span>L</span><b>${fmt(candle.low)}</b><span>C</span><b>${fmt(candle.close)}</b>`;
   },
 
   renderAlerts() {
