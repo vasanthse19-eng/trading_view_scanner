@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradeView Pro — Free Trading Terminal</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
-  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://s3.tradingview.com/tv.js"></script>
   <style>
     /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -430,24 +430,6 @@
       padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 13px;
     }
     .retry-btn:hover { background: #1e53e5; }
-
-    /* Drawing toolbar */
-    .drawing-toolbar {
-      position: absolute; top: 36px; left: 0; z-index: 45;
-      display: flex; flex-direction: column; gap: 2px;
-      background: var(--bg-secondary); border-right: 1px solid var(--border-color);
-      padding: 4px 3px;
-    }
-    .draw-btn {
-      background: transparent; border: none; color: var(--text-secondary);
-      cursor: pointer; padding: 6px 7px; border-radius: var(--radius);
-      font-size: 15px; line-height: 1; transition: all 0.15s;
-    }
-    .draw-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-    .draw-btn.active { background: var(--accent-blue); color: #fff; }
-    .draw-btn[title]::after { content: none; }
-    #tv-widget-container.drawing-mode { cursor: crosshair !important; }
-    #tv-widget-container.drawing-mode canvas { cursor: crosshair !important; }
   </style>
 </head>
 <body>
@@ -523,22 +505,7 @@
 
     <!-- Chart Area -->
     <main id="chart-area" style="position:relative;flex:1;overflow:hidden;">
-      <div class="chart-info-bar">
-        <span class="info-symbol" id="info-symbol">--</span>
-        <span class="info-price" id="info-price">--</span>
-        <span class="info-change" id="info-change">--</span>
-        <span class="info-ohlc" id="info-ohlc"></span>
-      </div>
-      <!-- Drawing toolbar (left side like TradingView) -->
-      <div class="drawing-toolbar" id="drawing-toolbar">
-        <button class="draw-btn" data-tool="trendline" title="Trend Line">╱</button>
-        <button class="draw-btn" data-tool="hline" title="Horizontal Line">━</button>
-        <button class="draw-btn" data-tool="ray" title="Ray">⟋</button>
-        <button class="draw-btn" data-tool="rect" title="Rectangle">▭</button>
-        <div style="border-top:1px solid var(--border-color);margin:2px 0;"></div>
-        <button class="draw-btn" id="btn-delete-drawings" title="Delete All Drawings">🗑</button>
-      </div>
-      <div id="tv-widget-container" style="width:calc(100% - 32px);height:calc(100% - 28px);margin-left:32px;"></div>
+      <div id="tv-widget-container" style="width:100%;height:100%;"></div>
     </main>
 
     <div class="panel-divider" id="divider-right"></div>
@@ -1343,498 +1310,121 @@ const API = {
   }
 };
 
-// ==================== CHART (Lightweight Charts + Yahoo Finance) ====================
+// ==================== CHART (TradingView Widget) ====================
 const TVChart = {
-  chart: null,
-  candleSeries: null,
-  volumeSeries: null,
-  _loading: false,
-  // Scroll-to-load state
-  _allCandles: [],
-  _allVolumes: [],
-  _oldestTimestamp: null,
-  _newestTimestamp: null,
-  _noMoreData: false,
-  _fetchingMore: false,
+  widget: null,
   _currentSymbol: null,
+  _currentMarket: null,
   _currentTimeframe: null,
-  _scrollCache: {},
 
-  IST_OFFSET: 19800, // UTC+5:30 in seconds
-
-  _maxRangeSeconds: {
-    '1m':  7 * 86400,
-    '5m':  60 * 86400,
-    '15m': 60 * 86400,
-    '60m': 730 * 86400,
-    '1d':  50 * 365 * 86400,
-    '1wk': 50 * 365 * 86400,
-    '1mo': 50 * 365 * 86400,
-  },
-
-  _chunkSizes: {
-    '1m':  2 * 86400,
-    '5m':  15 * 86400,
-    '15m': 20 * 86400,
-    '60m': 90 * 86400,
-    '1d':  2 * 365 * 86400,
-    '1wk': 5 * 365 * 86400,
-    '1mo': 10 * 365 * 86400,
-  },
-
-  init() {
-    const container = document.getElementById('tv-widget-container');
-    if (!container || this.chart) return;
-
-    const isDark = AppState.currentTheme !== 'light';
-    this.chart = LightweightCharts.createChart(container, {
-      width: container.clientWidth,
-      height: container.clientHeight,
-      layout: {
-        background: { type: 'solid', color: isDark ? '#0b0e11' : '#ffffff' },
-        textColor: isDark ? '#d1d4dc' : '#191919',
-      },
-      grid: {
-        vertLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
-        horzLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
-      },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: isDark ? '#2d3348' : '#e0e0e0' },
-      timeScale: {
-        borderColor: isDark ? '#2d3348' : '#e0e0e0',
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: 30,
-        tickMarkFormatter: (time, tickMarkType) => {
-          if (typeof time === 'object') {
-            return time.day + '/' + time.month + '/' + time.year;
-          }
-          const d = new Date(time * 1000);
-          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          // tickMarkType: 0=Year, 1=Month, 2=DayOfMonth, 3=Time, 4=TimeWithSeconds
-          if (tickMarkType === 0) return String(d.getUTCFullYear());
-          if (tickMarkType === 1) return months[d.getUTCMonth()] + ' \'' + String(d.getUTCFullYear()).slice(2);
-          if (tickMarkType === 2) return d.getUTCDate() + ' ' + months[d.getUTCMonth()];
-          return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
-        },
-      },
-      localization: {
-        priceFormatter: (price) => {
-          const m = AppState.currentMarket;
-          const curr = (m === 'nse' || m === 'bse') ? '₹' : '$';
-          if (Math.abs(price) >= 1) return curr + price.toFixed(2);
-          return curr + price.toFixed(6);
-        },
-        timeFormatter: (time) => {
-          if (typeof time === 'object') {
-            return time.day + '/' + time.month + '/' + time.year;
-          }
-          const d = new Date(time * 1000);
-          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          const day = d.getUTCDate();
-          const month = months[d.getUTCMonth()];
-          const year = d.getUTCFullYear();
-          const hrs = String(d.getUTCHours()).padStart(2,'0');
-          const mins = String(d.getUTCMinutes()).padStart(2,'0');
-          // Show time for intraday candles (non-midnight timestamps)
-          if (d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0) {
-            return day + ' ' + month + ' ' + year + '  ' + hrs + ':' + mins + ' IST';
-          }
-          return day + ' ' + month + ' ' + year;
-        },
-      }
-    });
-
-    this.candleSeries = this.chart.addCandlestickSeries({
-      upColor: '#26a69a', downColor: '#ef5350',
-      borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
-    });
-
-    this.volumeSeries = this.chart.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'volume',
-    });
-    this.chart.priceScale('volume').applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
-
-    // Responsive resize
-    this._resizeHandler = () => {
-      if (this.chart && container.clientWidth > 0) {
-        this.chart.resize(container.clientWidth, container.clientHeight);
-      }
+  // Convert our internal symbol format to TradingView format
+  _toTVSymbol(symbol, market) {
+    // NSE: RELIANCE.NS → NSE:RELIANCE
+    if (market === 'nse') return 'NSE:' + symbol.replace('.NS', '');
+    // BSE: RELIANCE.BO → BSE:RELIANCE
+    if (market === 'bse') return 'BSE:' + symbol.replace('.BO', '');
+    // Crypto: BTCUSDT → BINANCE:BTCUSDT
+    if (market === 'crypto') return 'BINANCE:' + symbol;
+    // Commodities (Yahoo futures → TradingView continuous contracts)
+    const commodityMap = {
+      'GC=F': 'COMEX:GC1!',  'SI=F': 'COMEX:SI1!',  'CL=F': 'NYMEX:CL1!',
+      'BZ=F': 'NYMEX:BZ1!',  'NG=F': 'NYMEX:NG1!',  'HG=F': 'COMEX:HG1!',
+      'PL=F': 'NYMEX:PL1!',  'PA=F': 'NYMEX:PA1!',  'ZW=F': 'CBOT:ZW1!',
+      'ZC=F': 'CBOT:ZC1!',   'ZS=F': 'CBOT:ZS1!',   'CT=F': 'ICEUS:CT1!',
+      'KC=F': 'ICEUS:KC1!',  'SB=F': 'ICEUS:SB1!',  'CC=F': 'ICEUS:CC1!',
     };
-    window.addEventListener('resize', this._resizeHandler);
-    new ResizeObserver(this._resizeHandler).observe(container);
-
-    // Crosshair OHLC: update info bar on hover
-    this.chart.subscribeCrosshairMove((param) => {
-      if (!param.time || !param.seriesData) {
-        if (this._allCandles.length > 0) {
-          const last = this._allCandles[this._allCandles.length - 1];
-          UIController.updateChartInfoBar(last);
-        }
-        return;
-      }
-      const candleData = param.seriesData.get(this.candleSeries);
-      if (candleData && candleData.open != null) {
-        UIController.updateChartInfoBar({
-          open: candleData.open, high: candleData.high,
-          low: candleData.low, close: candleData.close
-        });
-      }
-    });
-
-    // Scroll-to-load: detect when user scrolls near left edge
-    this._onVisibleRangeChange = debounce((logicalRange) => {
-      if (!logicalRange) return;
-      if (logicalRange.from <= 10) {
-        this._loadMoreHistory();
-      }
-    }, 300);
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange(this._onVisibleRangeChange);
+    if (commodityMap[symbol]) return commodityMap[symbol];
+    // US stocks — TradingView resolves the exchange automatically
+    return symbol;
   },
 
-  _getTimeframeParams(timeframe) {
+  // Convert our timeframe labels to TradingView interval format
+  _toTVInterval(timeframe) {
     const map = {
-      '1m':  { range: '7d',  interval: '1m' },
-      '5m':  { range: '60d', interval: '5m' },
-      '15m': { range: '60d', interval: '15m' },
-      '1h':  { range: '2y',  interval: '60m' },
-      '2h':  { range: '2y',  interval: '60m' },
-      '4h':  { range: '2y',  interval: '60m' },
-      '1D':  { range: '2y',  interval: '1d' },
-      '3D':  { range: '5y',  interval: '1d' },
-      '1W':  { range: '10y', interval: '1wk' },
-      '1M':  { range: '10y', interval: '1mo' },
+      '1m': '1', '5m': '5', '15m': '15', '1h': '60',
+      '2h': '120', '4h': '240', '1D': 'D', '3D': '3D',
+      '1W': 'W', '1M': 'M'
     };
-    return map[timeframe] || { range: '2y', interval: '1d' };
+    return map[timeframe] || 'D';
   },
 
-  _isIntraday(interval) {
-    return ['1m','5m','15m','60m'].includes(interval);
-  },
+  load(symbol, market, timeframe) {
+    const tf = timeframe || AppState.currentTimeframe || '1D';
+    const mkt = market || AppState.currentMarket || 'nse';
+    const tvSymbol = this._toTVSymbol(symbol, mkt);
+    const tvInterval = this._toTVInterval(tf);
 
-  _parseCandles(result, interval) {
-    const ts = result.timestamp;
-    const q = result.indicators?.quote?.[0];
-    if (!ts || !q) return { candles: [], volumes: [] };
-
-    const intraday = this._isIntraday(interval);
-    const candles = [];
-    const volumes = [];
-
-    for (let i = 0; i < ts.length; i++) {
-      if (q.open?.[i] != null && q.close?.[i] != null && q.high?.[i] != null && q.low?.[i] != null) {
-        // Unix timestamps for all intervals (Lightweight Charts displays as UTC)
-        // Intraday: shift by IST offset so x-axis reads IST
-        // Daily+: no shift needed (dates are date-level, no timezone concern)
-        const time = intraday ? ts[i] + this.IST_OFFSET : ts[i];
-
-        candles.push({
-          time,
-          open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
-          _rawTime: ts[i] // Original UTC timestamp for scroll-to-load calculations
-        });
-        volumes.push({
-          time,
-          value: q.volume?.[i] || 0,
-          color: q.close[i] >= q.open[i] ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
-        });
-      }
-    }
-    return { candles, volumes };
-  },
-
-  async _fetchYahooData(symbol, timeframe, { period1, period2 } = {}) {
-    const params = this._getTimeframeParams(timeframe);
-    const interval = params.interval;
-
-    // Convert crypto symbols to Yahoo format
-    let yahooSymbol = symbol;
-    if (AppState.currentMarket === 'crypto') {
-      yahooSymbol = symbol.replace('USDT', '-USD').replace('BUSD', '-USD').replace('USDC', '-USD');
-    }
-
-    // Build URL helper
-    const buildUrl = (range, p1, p2) => {
-      let proxyPath;
-      if (p1) {
-        const pp2 = p2 || Math.floor(Date.now() / 1000);
-        proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?period1=${p1}&period2=${pp2}&interval=${interval}`;
-      } else {
-        proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}`;
-      }
-      const serverUrl = AppState.settings.alertServerUrl;
-      if (serverUrl) return serverUrl + proxyPath;
-      if (window.location.protocol.startsWith('http')) return proxyPath;
-      const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}`;
-      return `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`;
-    };
-
-    const fetchAndParse = async (url) => {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Yahoo fetch failed: ${resp.status}`);
-      const data = await resp.json();
-      const result = data.chart?.result?.[0];
-      if (!result || !result.timestamp) throw new Error('No chart data');
-      const parsed = this._parseCandles(result, interval);
-      return { candles: parsed.candles, volumes: parsed.volumes, meta: result.meta };
-    };
-
-    // Primary fetch
-    let result = await fetchAndParse(buildUrl(params.range, period1, period2));
-
-    // If too few candles returned (Yahoo sometimes limits .BO/.NS with large ranges),
-    // retry with progressively smaller ranges
-    if (!period1 && result.candles.length < 5 && !this._isIntraday(interval)) {
-      const fallbackRanges = ['5y', '2y', '1y', '6mo', '3mo'];
-      for (const range of fallbackRanges) {
-        if (range === params.range) continue; // skip if same as original
-        try {
-          const retryResult = await fetchAndParse(buildUrl(range));
-          if (retryResult.candles.length > result.candles.length) {
-            result = retryResult;
-            if (result.candles.length >= 5) break; // good enough
-          }
-        } catch(e) { /* try next range */ }
-      }
-    }
-
-    return result;
-  },
-
-  _mergeData(existing, existingVol, newer, newerVol) {
-    // Deduplicate by original UTC timestamp
-    const existingTimes = new Set(existing.map(c => c._rawTime));
-    const uniqueCandles = [];
-    const uniqueVolumes = [];
-    for (let i = 0; i < newer.length; i++) {
-      if (!existingTimes.has(newer[i]._rawTime)) {
-        uniqueCandles.push(newer[i]);
-        uniqueVolumes.push(newerVol[i]);
-      }
-    }
-    const merged = [...uniqueCandles, ...existing];
-    const mergedVol = [...uniqueVolumes, ...existingVol];
-
-    // Sort by original UTC timestamp
-    const indices = merged.map((_, i) => i);
-    indices.sort((a, b) => merged[a]._rawTime - merged[b]._rawTime);
-    return {
-      candles: indices.map(i => merged[i]),
-      volumes: indices.map(i => mergedVol[i]),
-    };
-  },
-
-  _showScrollLoadingIndicator() {
-    let el = document.getElementById('scroll-load-indicator');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'scroll-load-indicator';
-      el.innerHTML = '<div class="scroll-load-spinner"></div><span>Loading history...</span>';
-      document.getElementById('tv-widget-container').appendChild(el);
-    }
-    el.classList.remove('hidden');
-  },
-
-  _hideScrollLoadingIndicator() {
-    const el = document.getElementById('scroll-load-indicator');
-    if (el) el.classList.add('hidden');
-  },
-
-  async _loadMoreHistory() {
-    if (this._fetchingMore || this._noMoreData || this._loading) return;
-    if (!this._allCandles.length) return;
-    this._fetchingMore = true;
-
-    const symbol = this._currentSymbol;
-    const timeframe = this._currentTimeframe;
-    const params = this._getTimeframeParams(timeframe);
-    const interval = params.interval;
-
-    // Calculate fetch range
-    const oldestRaw = this._allCandles[0]._rawTime;
-    if (!oldestRaw) { this._fetchingMore = false; return; }
-
-    const chunkSize = this._chunkSizes[interval] || 90 * 86400;
-    let period1 = oldestRaw - chunkSize;
-    const period2 = oldestRaw;
-
-    // Clamp to Yahoo max range
-    const maxRange = this._maxRangeSeconds[interval] || 50 * 365 * 86400;
-    const now = Math.floor(Date.now() / 1000);
-    if (now - period1 > maxRange) {
-      period1 = now - maxRange;
-      this._noMoreData = true;
-    }
-    if (period1 >= period2) {
-      this._noMoreData = true;
-      this._fetchingMore = false;
-      return;
-    }
-
-    // Check scroll cache
-    const cacheKey = `${symbol}:${interval}:${period1}:${period2}`;
-    let olderData;
-
-    this._showScrollLoadingIndicator();
-
-    try {
-      if (this._scrollCache[cacheKey]) {
-        olderData = this._scrollCache[cacheKey];
-      } else {
-        olderData = await this._fetchYahooData(symbol, timeframe, { period1, period2 });
-        this._scrollCache[cacheKey] = olderData;
-      }
-
-      if (!olderData.candles.length) {
-        this._noMoreData = true;
-        this._fetchingMore = false;
-        this._hideScrollLoadingIndicator();
-        return;
-      }
-
-      // Preserve scroll position
-      const currentRange = this.chart.timeScale().getVisibleLogicalRange();
-      const prevCount = this._allCandles.length;
-
-      // Merge
-      const merged = this._mergeData(this._allCandles, this._allVolumes, olderData.candles, olderData.volumes);
-      this._allCandles = merged.candles;
-      this._allVolumes = merged.volumes;
-      this._oldestTimestamp = this._allCandles[0]._rawTime;
-
-      // Update chart
-      this.candleSeries.setData(this._allCandles);
-      this.volumeSeries.setData(this._allVolumes);
-
-      // Restore scroll position (shift by newly added candles)
-      if (currentRange) {
-        const addedCount = this._allCandles.length - prevCount;
-        this.chart.timeScale().setVisibleLogicalRange({
-          from: currentRange.from + addedCount,
-          to: currentRange.to + addedCount,
-        });
-      }
-    } catch(e) {
-      console.warn('Scroll-to-load error:', e.message);
-    } finally {
-      this._hideScrollLoadingIndicator();
-      this._fetchingMore = false;
-    }
-  },
-
-  async load(symbol, market, timeframe) {
-    if (this._loading) return;
-    this._loading = true;
+    this._currentSymbol = symbol;
+    this._currentMarket = mkt;
+    this._currentTimeframe = tf;
 
     const container = document.getElementById('tv-widget-container');
-    let loadingEl = container.querySelector('.chart-loading-overlay');
-    if (!loadingEl) {
-      loadingEl = document.createElement('div');
-      loadingEl.className = 'chart-loading-overlay';
-      loadingEl.innerHTML = '<div class="chart-loading-spinner"></div><div class="chart-loading-text">Loading chart...</div>';
-      container.appendChild(loadingEl);
-    }
-    loadingEl.classList.remove('hidden');
+    if (!container) return;
 
-    if (!this.chart) this.init();
+    // Clear any existing widget
+    container.innerHTML = '';
+
+    // Create inner div for the widget
+    const inner = document.createElement('div');
+    inner.id = 'tv-chart-inner';
+    inner.style.cssText = 'width:100%;height:100%;';
+    container.appendChild(inner);
+
+    const isDark = AppState.currentTheme === 'light' ? 'light' : 'dark';
 
     try {
-      const tf = timeframe || AppState.currentTimeframe;
-      const { candles, volumes, meta } = await this._fetchYahooData(symbol, tf);
-
-      if (candles.length === 0) throw new Error('No candle data returned');
-
-      // Store scroll state
-      this._currentSymbol = symbol;
-      this._currentTimeframe = tf;
-      this._allCandles = candles;
-      this._allVolumes = volumes;
-      this._oldestTimestamp = candles[0]._rawTime;
-      this._newestTimestamp = candles[candles.length - 1]._rawTime;
-      this._noMoreData = false;
-      this._fetchingMore = false;
-      this._scrollCache = {};
-
-      // Update chart
-      this.candleSeries.setData(candles);
-      this.volumeSeries.setData(volumes);
-      this.chart.timeScale().fitContent();
-
-      // Theme
-      const isDark = AppState.currentTheme !== 'light';
-      this.chart.applyOptions({
-        layout: {
-          background: { type: 'solid', color: isDark ? '#0b0e11' : '#ffffff' },
-          textColor: isDark ? '#d1d4dc' : '#191919',
-        }
+      this.widget = new TradingView.widget({
+        autosize: true,
+        symbol: tvSymbol,
+        interval: tvInterval,
+        timezone: 'Asia/Kolkata',
+        theme: isDark,
+        style: '1',          // Candlestick
+        locale: 'en',
+        toolbar_bg: '#0b0e11',
+        enable_publishing: false,
+        withdateranges: true,
+        hide_side_toolbar: false,   // Show drawing tools
+        allow_symbol_change: true,  // Allow symbol search in widget
+        save_image: false,
+        container_id: 'tv-chart-inner',
+        studies: ['STD;Volume'],
+        loading_screen: { backgroundColor: '#0b0e11', foregroundColor: '#2962ff' },
+        overrides: {
+          'mainSeriesProperties.candleStyle.upColor': '#26a69a',
+          'mainSeriesProperties.candleStyle.downColor': '#ef5350',
+          'mainSeriesProperties.candleStyle.borderUpColor': '#26a69a',
+          'mainSeriesProperties.candleStyle.borderDownColor': '#ef5350',
+          'mainSeriesProperties.candleStyle.wickUpColor': '#26a69a',
+          'mainSeriesProperties.candleStyle.wickDownColor': '#ef5350',
+        },
+        disabled_features: ['header_symbol_search'],
+        enabled_features: ['study_templates'],
       });
 
-      // Update info bar
-      const lastCandle = candles[candles.length - 1];
-      if (lastCandle) {
-        AppState.candles = candles;
-        UIController.updateChartInfoBar(lastCandle);
-      }
-
-      StatusBar.update(true, `Yahoo Finance (${candles.length} candles)`);
-      loadingEl.classList.add('hidden');
-
-      // Re-render drawings overlay after chart data loads
-      if (typeof ChartDrawings !== 'undefined' && ChartDrawings.render) {
-        // Hook scroll/zoom re-render if not already hooked
-        if (!this._drawingHooked) {
-          this.chart.timeScale().subscribeVisibleTimeRangeChange(() => ChartDrawings.render());
-          this._drawingHooked = true;
-        }
-        ChartDrawings.render();
-      }
-
+      StatusBar.update(true, `TradingView (${tvSymbol})`);
     } catch(e) {
-      console.error('Chart load error:', e);
-      loadingEl.innerHTML = '<div class="error-icon">⚠️</div><div class="error-text">' + e.message + '</div><button class="retry-btn" onclick="TVChart.load(\'' + symbol + '\',\'' + market + '\',\'' + timeframe + '\')">Retry</button>';
+      console.error('TradingView widget error:', e);
+      container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#787b86;"><div style="text-align:center;"><div style="font-size:36px;margin-bottom:10px;">⚠️</div><div>Chart failed to load</div><div style="font-size:12px;margin-top:6px;">' + e.message + '</div></div></div>';
       StatusBar.update(false, 'Error loading chart');
-    } finally {
-      this._loading = false;
     }
   },
 
   applyTheme(themeName) {
-    if (!this.chart) return;
-    const isDark = themeName !== 'light';
-    this.chart.applyOptions({
-      layout: {
-        background: { type: 'solid', color: isDark ? '#0b0e11' : '#ffffff' },
-        textColor: isDark ? '#d1d4dc' : '#191919',
-      },
-      grid: {
-        vertLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
-        horzLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
-      }
-    });
+    // TradingView widget must be recreated for theme change
+    if (this._currentSymbol) {
+      this.load(this._currentSymbol, this._currentMarket, this._currentTimeframe);
+    }
   },
 
   destroy() {
-    if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
-    if (this.chart) {
-      if (this._onVisibleRangeChange) {
-        try { this.chart.timeScale().unsubscribeVisibleLogicalRangeChange(this._onVisibleRangeChange); } catch(e) {}
-      }
-      this.chart.remove();
-      this.chart = null;
-    }
-    this.candleSeries = null;
-    this.volumeSeries = null;
-    this._allCandles = [];
-    this._allVolumes = [];
-    this._scrollCache = {};
+    const container = document.getElementById('tv-widget-container');
+    if (container) container.innerHTML = '';
+    this.widget = null;
   }
 };
 
-// Stubs for compatibility — old modules are replaced by TradingView widget
+// Stubs for compatibility
 const ChartManager = {
   init() {},
   showLoading() {},
@@ -2969,7 +2559,6 @@ const App = {
     PanelResizer.init();
     WatchlistManager.init();
     WatchlistManager.loadPatternWatchlists();
-    ChartDrawings.init();
     if (AppState.currentMarket !== 'crypto') this.startStockChartPolling();
 
     StatusBar.update(false, 'Initializing...');
@@ -2985,7 +2574,6 @@ const App = {
     const btn = document.querySelector(`.market-btn[data-market="${market}"]`);
     if (btn) btn.classList.add('active');
     TVChart.load(symbol, market, AppState.currentTimeframe);
-    ChartDrawings.onSymbolChange();
     if (market === 'crypto') {
       if (AppState.stockPollTimer) { clearInterval(AppState.stockPollTimer); AppState.stockPollTimer = null; }
     } else {
@@ -3014,327 +2602,6 @@ const App = {
       }
     };
     AppState.stockPollTimer = setInterval(tick, 1000);
-  }
-};
-
-// ==================== CHART DRAWINGS ====================
-const ChartDrawings = {
-  _tool: null,        // 'trendline', 'hline', 'ray', 'rect'
-  _drawings: [],      // stored as { type, p1:{logical,price}, p2:{logical,price}, color }
-  _activePoint: null,
-  _canvas: null,
-  _ctx: null,
-  _hoveredIdx: -1,
-  _pendingPreview: null,
-
-  init() {
-    const container = document.getElementById('tv-widget-container');
-    if (!container) return;
-
-    this._canvas = document.createElement('canvas');
-    this._canvas.id = 'drawing-canvas';
-    this._canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:30;pointer-events:none;';
-    container.appendChild(this._canvas);
-    this._ctx = this._canvas.getContext('2d');
-    this._resizeCanvas();
-
-    // Toolbar buttons
-    document.querySelectorAll('.draw-btn[data-tool]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tool = btn.dataset.tool;
-        this._tool === tool ? this.deactivate() : this.activate(tool);
-      });
-    });
-
-    // Delete all
-    const delBtn = document.getElementById('btn-delete-drawings');
-    if (delBtn) delBtn.addEventListener('click', () => this.clearAll());
-
-    // Keyboard
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.deactivate();
-      if (e.key === 'Delete' && this._hoveredIdx >= 0) {
-        this._drawings.splice(this._hoveredIdx, 1);
-        this._hoveredIdx = -1;
-        this._saveDrawings();
-        this.render();
-      }
-    });
-
-    // Mouse events
-    container.addEventListener('mousedown', (e) => this._onMouseDown(e));
-    container.addEventListener('mousemove', (e) => this._onMouseMove(e));
-
-    // Resize observer
-    new ResizeObserver(() => { this._resizeCanvas(); this.render(); }).observe(container);
-
-    this._loadDrawings();
-  },
-
-  _resizeCanvas() {
-    if (!this._canvas) return;
-    const parent = this._canvas.parentElement;
-    if (!parent) return;
-    this._canvas.width = parent.clientWidth;
-    this._canvas.height = parent.clientHeight;
-  },
-
-  activate(tool) {
-    this._tool = tool;
-    this._activePoint = null;
-    this._pendingPreview = null;
-    document.querySelectorAll('.draw-btn[data-tool]').forEach(b => b.classList.remove('active'));
-    const btn = document.querySelector(`.draw-btn[data-tool="${tool}"]`);
-    if (btn) btn.classList.add('active');
-    document.getElementById('tv-widget-container').classList.add('drawing-mode');
-    this._canvas.style.pointerEvents = 'auto';
-  },
-
-  deactivate() {
-    this._tool = null;
-    this._activePoint = null;
-    this._pendingPreview = null;
-    document.querySelectorAll('.draw-btn[data-tool]').forEach(b => b.classList.remove('active'));
-    const container = document.getElementById('tv-widget-container');
-    if (container) container.classList.remove('drawing-mode');
-    if (this._canvas) this._canvas.style.pointerEvents = 'none';
-    this.render();
-  },
-
-  // Convert pixel coords to { logical, price } — works in future space
-  _pixelToChart(e) {
-    if (!TVChart.chart || !TVChart.candleSeries) return null;
-    const rect = this._canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const logical = TVChart.chart.timeScale().coordinateToLogical(x);
-    const price = TVChart.candleSeries.coordinateToPrice(y);
-    if (logical == null || price == null) return null;
-    return { logical, price, x, y };
-  },
-
-  // Convert { logical, price } to pixel { x, y }
-  _chartToPixel(logical, price) {
-    if (!TVChart.chart || !TVChart.candleSeries) return null;
-    const x = TVChart.chart.timeScale().logicalToCoordinate(logical);
-    const y = TVChart.candleSeries.priceToCoordinate(price);
-    if (x == null || y == null) return null;
-    return { x, y };
-  },
-
-  _onMouseDown(e) {
-    if (!this._tool) return;
-    const pt = this._pixelToChart(e);
-    if (!pt) return;
-
-    if (this._tool === 'hline') {
-      this._drawings.push({ type: 'hline', price: pt.price, color: '#2962ff' });
-      this._saveDrawings();
-      this.render();
-      return;
-    }
-
-    // Two-point tools
-    if (!this._activePoint) {
-      this._activePoint = { logical: pt.logical, price: pt.price };
-    } else {
-      this._drawings.push({
-        type: this._tool,
-        p1: { logical: this._activePoint.logical, price: this._activePoint.price },
-        p2: { logical: pt.logical, price: pt.price },
-        color: this._tool === 'rect' ? 'rgba(41,98,255,0.2)' : '#2962ff'
-      });
-      this._activePoint = null;
-      this._pendingPreview = null;
-      this._saveDrawings();
-      this.render();
-    }
-  },
-
-  _onMouseMove(e) {
-    const rect = this._canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    // Preview while drawing
-    if (this._tool && this._activePoint) {
-      const pt = this._pixelToChart(e);
-      if (pt) {
-        this._pendingPreview = { logical: pt.logical, price: pt.price };
-        this.render();
-      }
-      return;
-    }
-
-    // Hover detection when not drawing
-    if (!this._tool) {
-      const prevHovered = this._hoveredIdx;
-      this._hoveredIdx = this._hitTest(mx, my);
-      if (prevHovered !== this._hoveredIdx) {
-        this._canvas.style.pointerEvents = this._hoveredIdx >= 0 ? 'auto' : 'none';
-        this._canvas.style.cursor = this._hoveredIdx >= 0 ? 'pointer' : 'default';
-        this.render();
-      }
-    }
-  },
-
-  _hitTest(x, y) {
-    if (!TVChart.chart || !TVChart.candleSeries) return -1;
-    const threshold = 8;
-    const w = this._canvas.width;
-
-    for (let i = this._drawings.length - 1; i >= 0; i--) {
-      const d = this._drawings[i];
-      if (d.type === 'hline') {
-        const py = TVChart.candleSeries.priceToCoordinate(d.price);
-        if (py != null && Math.abs(y - py) < threshold) return i;
-      } else {
-        const c1 = this._chartToPixel(d.p1.logical, d.p1.price);
-        const c2 = this._chartToPixel(d.p2.logical, d.p2.price);
-        if (!c1 || !c2) continue;
-
-        if (d.type === 'rect') {
-          const rx = Math.min(c1.x, c2.x), ry = Math.min(c1.y, c2.y);
-          const rw = Math.abs(c2.x - c1.x), rh = Math.abs(c2.y - c1.y);
-          if (x >= rx - threshold && x <= rx + rw + threshold && y >= ry - threshold && y <= ry + rh + threshold) {
-            // Near edges
-            if (Math.abs(x - rx) < threshold || Math.abs(x - rx - rw) < threshold ||
-                Math.abs(y - ry) < threshold || Math.abs(y - ry - rh) < threshold) return i;
-          }
-        } else {
-          // Trendline: segment only. Ray: extend in p1→p2 direction.
-          const isSegment = d.type === 'trendline';
-          const dist = this._pointToSegDist(x, y, c1.x, c1.y, c2.x, c2.y, isSegment);
-          if (dist < threshold) return i;
-        }
-      }
-    }
-    return -1;
-  },
-
-  _pointToSegDist(px, py, x1, y1, x2, y2, isSegment) {
-    const dx = x2 - x1, dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
-    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-    if (isSegment) t = Math.max(0, Math.min(1, t));
-    else t = Math.max(0, t); // ray: only forward
-    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-  },
-
-  render() {
-    if (!this._ctx || !this._canvas) return;
-    const ctx = this._ctx;
-    const w = this._canvas.width, h = this._canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    if (!TVChart.chart || !TVChart.candleSeries) return;
-
-    this._drawings.forEach((d, idx) => {
-      const isHovered = idx === this._hoveredIdx;
-      ctx.strokeStyle = isHovered ? '#ff9800' : (d.color || '#2962ff');
-      ctx.lineWidth = isHovered ? 2.5 : 1.5;
-      ctx.setLineDash([]);
-
-      if (d.type === 'hline') {
-        const py = TVChart.candleSeries.priceToCoordinate(d.price);
-        if (py == null) return;
-        ctx.setLineDash([6, 3]);
-        ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
-        ctx.fillStyle = isHovered ? '#ff9800' : '#2962ff';
-        ctx.font = '11px sans-serif';
-        ctx.fillText(d.price.toFixed(2), 4, py - 4);
-        return;
-      }
-
-      const c1 = this._chartToPixel(d.p1.logical, d.p1.price);
-      const c2 = this._chartToPixel(d.p2.logical, d.p2.price);
-      if (!c1 || !c2) return;
-
-      if (d.type === 'rect') {
-        const rx = Math.min(c1.x, c2.x), ry = Math.min(c1.y, c2.y);
-        const rw = Math.abs(c2.x - c1.x), rh = Math.abs(c2.y - c1.y);
-        ctx.fillStyle = isHovered ? 'rgba(255,152,0,0.15)' : (d.color || 'rgba(41,98,255,0.2)');
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.strokeStyle = isHovered ? '#ff9800' : '#2962ff';
-        ctx.strokeRect(rx, ry, rw, rh);
-      } else {
-        // Trendline or Ray
-        ctx.beginPath();
-        ctx.moveTo(c1.x, c1.y);
-        if (d.type === 'ray') {
-          // Extend far beyond p2
-          const dx = c2.x - c1.x, dy = c2.y - c1.y;
-          const len = Math.hypot(dx, dy);
-          if (len > 0) {
-            const scale = Math.max(w, h) * 3 / len;
-            ctx.lineTo(c1.x + dx * scale, c1.y + dy * scale);
-          }
-        } else {
-          ctx.lineTo(c2.x, c2.y);
-        }
-        ctx.stroke();
-
-        // Anchor dots on hover
-        if (isHovered) {
-          [c1, c2].forEach(p => {
-            ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-            ctx.fillStyle = '#ff9800'; ctx.fill();
-          });
-        }
-      }
-    });
-
-    // Preview while drawing
-    if (this._activePoint && this._pendingPreview) {
-      const c1 = this._chartToPixel(this._activePoint.logical, this._activePoint.price);
-      const c2 = this._chartToPixel(this._pendingPreview.logical, this._pendingPreview.price);
-      if (c1 && c2) {
-        ctx.strokeStyle = 'rgba(41,98,255,0.6)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        if (this._tool === 'rect') {
-          const rx = Math.min(c1.x, c2.x), ry = Math.min(c1.y, c2.y);
-          ctx.strokeRect(rx, ry, Math.abs(c2.x - c1.x), Math.abs(c2.y - c1.y));
-        } else {
-          ctx.moveTo(c1.x, c1.y);
-          ctx.lineTo(c2.x, c2.y);
-          ctx.stroke();
-        }
-        // Show first anchor dot
-        ctx.fillStyle = '#2962ff';
-        ctx.beginPath(); ctx.arc(c1.x, c1.y, 4, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-  },
-
-  clearAll() {
-    this._drawings = [];
-    this._hoveredIdx = -1;
-    this._saveDrawings();
-    this.render();
-  },
-
-  _saveDrawings() {
-    try {
-      const key = 'tv_drawings_' + AppState.currentSymbol;
-      localStorage.setItem(key, JSON.stringify(this._drawings));
-    } catch(e) {}
-  },
-
-  _loadDrawings() {
-    try {
-      const key = 'tv_drawings_' + AppState.currentSymbol;
-      const data = localStorage.getItem(key);
-      this._drawings = data ? JSON.parse(data) : [];
-    } catch(e) { this._drawings = []; }
-    this.render();
-  },
-
-  onSymbolChange() {
-    this.deactivate();
-    this._loadDrawings();
   }
 };
 
