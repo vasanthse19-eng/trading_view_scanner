@@ -773,7 +773,7 @@ const Storage = {
 // ==================== CANDLE CACHE (IndexedDB) ====================
 const CandleCache = {
   DB_NAME: 'tradeview_candle_cache',
-  DB_VERSION: 1,
+  DB_VERSION: 2,  // Bumped to clear stale AllOrigins data
   STORE_NAME: 'candles',
   db: null,
 
@@ -980,18 +980,23 @@ const API = {
     } catch(e) { return []; }
   },
 
-  // --- Yahoo Finance (via AllOrigins proxy) ---
+  // --- Yahoo Finance ---
+  _getYahooProxyUrl(path) {
+    // 1. Explicit alert server URL
+    const serverUrl = AppState.settings.alertServerUrl;
+    if (serverUrl) return `${serverUrl}${path}`;
+    // 2. Auto-detect: if running on http(s), use same-origin proxy (works on Render)
+    if (window.location.protocol.startsWith('http')) return path;
+    // 3. Fallback to AllOrigins for local file:// usage
+    return null;
+  },
+
   async fetchYahooChart(symbol, timeframe) {
     const m = this.yahooMap[timeframe] || { range: '1mo', interval: '60m' };
-    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
-    let url;
-    const serverUrl = AppState.settings.alertServerUrl;
-    if (serverUrl) {
-      // Use Render backend as Yahoo proxy (fastest, no CORS issues)
-      url = `${serverUrl}/api/yahoo/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
-    } else if (AppState.settings.stockDataSource === 'server_proxy') {
-      url = `/api/yahoo/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
-    } else {
+    const proxyPath = `/api/yahoo/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
+    let url = this._getYahooProxyUrl(proxyPath);
+    if (!url) {
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${m.range}&interval=${m.interval}`;
       url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
     }
     const resp = await fetch(url);
@@ -1021,13 +1026,9 @@ const API = {
   // --- Yahoo Search ---
   async searchYahoo(query) {
     try {
-      let url;
-      const serverUrl = AppState.settings.alertServerUrl;
-      if (serverUrl) {
-        url = `${serverUrl}/api/yahoo/search?q=${encodeURIComponent(query)}`;
-      } else if (AppState.settings.stockDataSource === 'server_proxy') {
-        url = `/api/yahoo/search?q=${encodeURIComponent(query)}`;
-      } else {
+      const proxyPath = `/api/yahoo/search?q=${encodeURIComponent(query)}`;
+      let url = this._getYahooProxyUrl(proxyPath);
+      if (!url) {
         const yUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=8&newsCount=0`;
         url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`;
       }
@@ -2243,12 +2244,19 @@ const Watchlist = {
 
     const pollBulk = async () => {
       // Use backend bulk endpoint — fetches ALL stocks in one request
+      let bulkUrl;
       const serverUrl = AppState.settings.alertServerUrl;
-      if (!serverUrl) return pollIndividual(); // fallback if no server configured
+      if (serverUrl) {
+        bulkUrl = `${serverUrl}/api/prices/bulk`;
+      } else if (window.location.protocol.startsWith('http')) {
+        bulkUrl = `/api/prices/bulk`;
+      } else {
+        return pollIndividual(); // no server available
+      }
 
       try {
         const symbols = stocks.map(s => ({ symbol: s.symbol, market: s.market }));
-        const resp = await fetch(`${serverUrl}/api/prices/bulk`, {
+        const resp = await fetch(bulkUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbols })
@@ -2291,14 +2299,10 @@ const Watchlist = {
               continue;
             }
           }
-          const serverUrl = AppState.settings.alertServerUrl;
-          const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}?range=1d&interval=1m`;
-          let url;
-          if (serverUrl) {
-            url = `${serverUrl}/api/yahoo/chart/${s.symbol}?range=1d&interval=1m`;
-          } else if (AppState.settings.stockDataSource === 'server_proxy') {
-            url = `/api/yahoo/chart/${s.symbol}?range=1d&interval=1m`;
-          } else {
+          const proxyPath = `/api/yahoo/chart/${s.symbol}?range=1d&interval=1m`;
+          let url = API._getYahooProxyUrl(proxyPath);
+          if (!url) {
+            const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}?range=1d&interval=1m`;
             url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
           }
           const resp = await fetch(url);
