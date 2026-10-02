@@ -2892,16 +2892,13 @@ const App = {
     Watchlist.init();
     if (AppState.currentMarket === 'stocks') this.startStockChartPolling();
 
+    // Prefetch all watchlist symbols in background so switching is instant
+    this.prefetchWatchlist();
+
     StatusBar.update(false, 'Initializing...');
   },
 
   async switchSymbol(symbol, market) {
-    // Fade chart and clear stale data
-    const chartArea = document.getElementById('chart-area');
-    if (chartArea) { chartArea.style.transition = 'opacity 0.15s'; chartArea.style.opacity = '0.5'; }
-    if (AppState.series && AppState.series.candlestick) {
-      try { AppState.series.candlestick.setData([]); } catch(e) {}
-    }
     AppState.currentSymbol = symbol;
     AppState.currentMarket = market;
     AppState.prevPrices = {};
@@ -2912,6 +2909,17 @@ const App = {
     document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`.market-btn[data-market="${market}"]`);
     if (btn) btn.classList.add('active');
+
+    // Check if we have cached data — if so, skip the fade and show instantly
+    const cached = await CandleCache.get(symbol, market, AppState.currentTimeframe);
+    if (!cached || !cached.candles || cached.candles.length === 0) {
+      // No cache — fade chart while loading
+      const chartArea = document.getElementById('chart-area');
+      if (chartArea) { chartArea.style.transition = 'opacity 0.15s'; chartArea.style.opacity = '0.5'; }
+      if (AppState.series && AppState.series.candlestick) {
+        try { AppState.series.candlestick.setData([]); } catch(e) {}
+      }
+    }
 
     await this.loadChartData();
     if (market === 'crypto') {
@@ -2998,6 +3006,40 @@ const App = {
     } catch(e) {
       console.warn('Background refresh failed:', e.message);
     }
+  },
+
+  // Prefetch all watchlist symbols so switching is instant
+  async prefetchWatchlist() {
+    const timeframe = AppState.currentTimeframe;
+    const currentSym = AppState.currentSymbol;
+    const toFetch = AppState.watchlist.filter(w => w.symbol !== currentSym);
+
+    console.log(`[Prefetch] Starting background prefetch for ${toFetch.length} watchlist symbols...`);
+    let fetched = 0;
+
+    // Fetch 3 at a time to avoid hammering APIs
+    for (let i = 0; i < toFetch.length; i += 3) {
+      const batch = toFetch.slice(i, i + 3);
+      const promises = batch.map(async (w) => {
+        try {
+          // Skip if already cached and fresh
+          const cached = await CandleCache.get(w.symbol, w.market, timeframe);
+          if (cached && !CandleCache.isStale(cached, timeframe)) return;
+
+          const candles = await API.fetchCandles(w.symbol, w.market, timeframe);
+          if (candles && candles.length > 0) {
+            await CandleCache.put(w.symbol, w.market, timeframe, candles);
+            fetched++;
+          }
+        } catch(e) {
+          // Silent fail — prefetch is best-effort
+        }
+      });
+      await Promise.all(promises);
+      // Small delay between batches to be gentle on APIs
+      if (i + 3 < toFetch.length) await new Promise(r => setTimeout(r, 500));
+    }
+    console.log(`[Prefetch] Done. ${fetched} symbols cached for ${timeframe}.`);
   },
 
   connectRealtime() {
