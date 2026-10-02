@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradeView Pro — Free Trading Terminal</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
-  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://s3.tradingview.com/tv.js"></script>
   <style>
     /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,7 +45,7 @@
       --shadow: 0 4px 12px rgba(0,0,0,0.4);
       --radius: 4px;
       --radius-lg: 8px;
-      --toolbar-height: 80px;
+      --toolbar-height: 48px;
       --statusbar-height: 24px;
       --sidebar-width: 240px;
     }
@@ -383,25 +383,6 @@
         <button class="icon-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
       </div>
     </div>
-
-    <!-- ROW 2: Secondary — Timeframes, Indicators Dropdown, Drawing Tools, Utils -->
-    <div class="toolbar-row secondary">
-      <div class="toolbar-section center" id="timeframe-bar"></div>
-      <div class="divider"></div>
-      <!-- Indicator Dropdown -->
-      <div class="ind-dropdown" id="ind-dropdown">
-        <button class="ind-dropdown-btn" id="ind-dropdown-btn">Indicators ▾</button>
-        <div class="ind-dropdown-panel" id="ind-dropdown-panel"></div>
-      </div>
-      <div class="divider"></div>
-      <button class="tool-btn" data-tool="trendline" title="Draw Trendline">📏 Trend</button>
-      <button class="tool-btn" data-tool="hline" title="Horizontal Line">─ H-Line</button>
-      <button class="tool-btn" data-tool="fib" title="Fibonacci Retracement">Fib</button>
-      <div class="divider"></div>
-      <button class="icon-btn" id="btn-screenshot" title="Screenshot Chart">📸</button>
-      <button class="icon-btn" id="btn-theme" title="Change Theme">🎨</button>
-      <button class="icon-btn" id="btn-hotkeys" title="Hotkeys">⌨️</button>
-    </div>
   </header>
 
   <!-- ===== MAIN CONTAINER ===== -->
@@ -428,40 +409,8 @@
     </aside>
 
     <!-- Chart Area -->
-    <main id="chart-area">
-      <div class="chart-info-bar" id="chart-info-bar">
-        <span class="info-symbol" id="info-symbol">BTCUSDT</span>
-        <span class="info-price" id="info-price">--</span>
-        <span class="info-change" id="info-change"></span>
-        <span class="info-ohlc" id="info-ohlc"></span>
-      </div>
-      <div id="main-chart-container">
-        <div class="chart-loading-overlay hidden" id="chart-loading">
-          <div class="chart-loading-spinner"></div>
-          <div class="chart-loading-text" id="chart-loading-text">Loading...</div>
-        </div>
-        <div class="chart-error-overlay hidden" id="chart-error">
-          <div class="error-icon">⚠️</div>
-          <div class="error-text" id="chart-error-text">Failed to load data</div>
-          <button class="retry-btn" id="chart-retry-btn">Retry</button>
-        </div>
-        <canvas id="trendline-canvas"></canvas>
-      </div>
-      <div id="rsi-chart-container" class="sub-chart-container hidden">
-        <span class="sub-chart-label">RSI (14)</span>
-      </div>
-      <div id="macd-chart-container" class="sub-chart-container hidden">
-        <span class="sub-chart-label">MACD (12,26,9)</span>
-      </div>
-      <div id="volume-chart-container" class="sub-chart-container hidden">
-        <span class="sub-chart-label">Volume</span>
-      </div>
-      <div id="stoch-chart-container" class="sub-chart-container hidden" style="height:120px;">
-        <span class="sub-chart-label">Stoch RSI (14)</span>
-      </div>
-      <div id="atr-chart-container" class="sub-chart-container hidden" style="height:100px;">
-        <span class="sub-chart-label">ATR (14)</span>
-      </div>
+    <main id="chart-area" style="position:relative;flex:1;overflow:hidden;">
+      <div id="tv-widget-container" style="width:100%;height:100%;"></div>
     </main>
 
     <!-- Alert Panel -->
@@ -690,9 +639,6 @@ const AppState = {
   chartType: 'candlestick', // candlestick | line | area | heikinashi
   currentTheme: 'dark',
   activeIndicators: new Set(['volume']),
-  drawingMode: null, // null | 'trendline' | 'hline' | 'fib'
-  fibStart: null,
-  drawingStart: null,
   candles: [],
   watchlist: [],
   alerts: [],
@@ -708,11 +654,7 @@ const AppState = {
   ws: null,
   tickerWs: null,
   stockPollInterval: null,
-  charts: { main: null, rsi: null, macd: null, volume: null },
-  series: {},
-  crosshairPos: { time: null, price: null },
-  prevPrices: {}, // for trendline alert: symbol -> {price, time}
-  tickCount: 0
+  prevPrices: {} // for trendline alert: symbol -> {price, time}
 };
 
 // ==================== STORAGE ====================
@@ -1136,874 +1078,84 @@ const API = {
   }
 };
 
-// ==================== INDICATORS ====================
-const Indicators = {
-  sma(candles, period) {
-    const result = [];
-    for (let i = period - 1; i < candles.length; i++) {
-      let sum = 0;
-      for (let j = i - period + 1; j <= i; j++) sum += candles[j].close;
-      result.push({ time: candles[i].time, value: sum / period });
-    }
-    return result;
+// ==================== TRADINGVIEW CHART WIDGET ====================
+const TVChart = {
+  widget: null,
+
+  // Convert our symbol format to TradingView format
+  toTVSymbol(symbol, market) {
+    if (market === 'crypto') return `BINANCE:${symbol}`;
+    if (market === 'nse') return `NSE:${symbol.replace('.NS', '')}`;
+    if (market === 'bse') return `BSE:${symbol.replace('.BO', '')}`;
+    // US stocks — just use symbol directly
+    return symbol;
   },
 
-  ema(candles, period) {
-    if (candles.length < period) return [];
-    const k = 2 / (period + 1);
-    const result = [];
-    let sum = 0;
-    for (let i = 0; i < period; i++) sum += candles[i].close;
-    let emaVal = sum / period;
-    result.push({ time: candles[period - 1].time, value: emaVal });
-    for (let i = period; i < candles.length; i++) {
-      emaVal = candles[i].close * k + emaVal * (1 - k);
-      result.push({ time: candles[i].time, value: emaVal });
-    }
-    return result;
-  },
-
-  rsi(candles, period = 14) {
-    if (candles.length < period + 1) return [];
-    const result = [];
-    let avgGain = 0, avgLoss = 0;
-    for (let i = 1; i <= period; i++) {
-      const change = candles[i].close - candles[i - 1].close;
-      if (change > 0) avgGain += change; else avgLoss += Math.abs(change);
-    }
-    avgGain /= period;
-    avgLoss /= period;
-    let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    result.push({ time: candles[period].time, value: 100 - 100 / (1 + rs) });
-    for (let i = period + 1; i < candles.length; i++) {
-      const change = candles[i].close - candles[i - 1].close;
-      const gain = change > 0 ? change : 0;
-      const loss = change < 0 ? Math.abs(change) : 0;
-      avgGain = (avgGain * (period - 1) + gain) / period;
-      avgLoss = (avgLoss * (period - 1) + loss) / period;
-      rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-      result.push({ time: candles[i].time, value: 100 - 100 / (1 + rs) });
-    }
-    return result;
-  },
-
-  macd(candles, fast = 12, slow = 26, signal = 9) {
-    const ema12 = this.ema(candles, fast);
-    const ema26 = this.ema(candles, slow);
-    if (!ema12.length || !ema26.length) return { macdLine: [], signalLine: [], histogram: [] };
-    // Align by time
-    const ema26Times = new Set(ema26.map(e => e.time));
-    const aligned12 = ema12.filter(e => ema26Times.has(e.time));
-    const ema26Map = Object.fromEntries(ema26.map(e => [e.time, e.value]));
-    const macdLine = aligned12.map(e => ({ time: e.time, value: e.value - ema26Map[e.time] }));
-    if (macdLine.length < signal) return { macdLine, signalLine: [], histogram: [] };
-    // Signal = EMA of MACD line
-    const k = 2 / (signal + 1);
-    let sum = 0;
-    for (let i = 0; i < signal; i++) sum += macdLine[i].value;
-    let sigVal = sum / signal;
-    const signalLine = [{ time: macdLine[signal - 1].time, value: sigVal }];
-    for (let i = signal; i < macdLine.length; i++) {
-      sigVal = macdLine[i].value * k + sigVal * (1 - k);
-      signalLine.push({ time: macdLine[i].time, value: sigVal });
-    }
-    const sigMap = Object.fromEntries(signalLine.map(s => [s.time, s.value]));
-    const histogram = macdLine.filter(m => sigMap[m.time] !== undefined).map(m => {
-      const diff = m.value - sigMap[m.time];
-      return { time: m.time, value: diff, color: diff >= 0 ? 'rgba(38,166,154,0.6)' : 'rgba(239,83,80,0.6)' };
-    });
-    return { macdLine, signalLine, histogram };
-  },
-
-  bollingerBands(candles, period = 20, mult = 2) {
-    const upper = [], middle = [], lower = [];
-    for (let i = period - 1; i < candles.length; i++) {
-      let sum = 0;
-      for (let j = i - period + 1; j <= i; j++) sum += candles[j].close;
-      const sma = sum / period;
-      let sqSum = 0;
-      for (let j = i - period + 1; j <= i; j++) sqSum += (candles[j].close - sma) ** 2;
-      const std = Math.sqrt(sqSum / period);
-      middle.push({ time: candles[i].time, value: sma });
-      upper.push({ time: candles[i].time, value: sma + mult * std });
-      lower.push({ time: candles[i].time, value: sma - mult * std });
-    }
-    return { upper, middle, lower };
-  },
-
-  volume(candles) {
-    return candles.map(c => ({
-      time: c.time, value: c.volume,
-      color: c.close >= c.open ? 'rgba(38,166,154,0.4)' : 'rgba(239,83,80,0.4)'
-    }));
-  },
-
-  stochasticRSI(candles, rsiPeriod = 14, stochPeriod = 14, kSmooth = 3, dSmooth = 3) {
-    const rsiData = this.rsi(candles, rsiPeriod);
-    if (rsiData.length < stochPeriod) return { k: [], d: [] };
-    const kLine = [];
-    for (let i = stochPeriod - 1; i < rsiData.length; i++) {
-      let highest = -Infinity, lowest = Infinity;
-      for (let j = i - stochPeriod + 1; j <= i; j++) {
-        highest = Math.max(highest, rsiData[j].value);
-        lowest = Math.min(lowest, rsiData[j].value);
-      }
-      const stoch = highest === lowest ? 50 : ((rsiData[i].value - lowest) / (highest - lowest)) * 100;
-      kLine.push({ time: rsiData[i].time, value: stoch });
-    }
-    // Smooth K
-    const smoothK = [];
-    for (let i = kSmooth - 1; i < kLine.length; i++) {
-      let sum = 0;
-      for (let j = i - kSmooth + 1; j <= i; j++) sum += kLine[j].value;
-      smoothK.push({ time: kLine[i].time, value: sum / kSmooth });
-    }
-    // D line = SMA of smoothK
-    const dLine = [];
-    for (let i = dSmooth - 1; i < smoothK.length; i++) {
-      let sum = 0;
-      for (let j = i - dSmooth + 1; j <= i; j++) sum += smoothK[j].value;
-      dLine.push({ time: smoothK[i].time, value: sum / dSmooth });
-    }
-    return { k: smoothK, d: dLine };
-  },
-
-  atr(candles, period = 14) {
-    if (candles.length < 2) return [];
-    const trueRanges = [];
-    for (let i = 1; i < candles.length; i++) {
-      const high = candles[i].high, low = candles[i].low, prevClose = candles[i - 1].close;
-      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-      trueRanges.push({ time: candles[i].time, value: tr });
-    }
-    if (trueRanges.length < period) return [];
-    const result = [];
-    let sum = 0;
-    for (let i = 0; i < period; i++) sum += trueRanges[i].value;
-    let atrVal = sum / period;
-    result.push({ time: trueRanges[period - 1].time, value: atrVal });
-    for (let i = period; i < trueRanges.length; i++) {
-      atrVal = (atrVal * (period - 1) + trueRanges[i].value) / period;
-      result.push({ time: trueRanges[i].time, value: atrVal });
-    }
-    return result;
-  },
-
-  vwap(candles) {
-    // Intraday VWAP - resets each day
-    const result = [];
-    let cumVol = 0, cumTP = 0, prevDay = null;
-    candles.forEach(c => {
-      const d = new Date(c.time * 1000);
-      const day = d.toDateString();
-      if (day !== prevDay) { cumVol = 0; cumTP = 0; prevDay = day; }
-      const tp = (c.high + c.low + c.close) / 3;
-      cumTP += tp * c.volume;
-      cumVol += c.volume;
-      result.push({ time: c.time, value: cumVol > 0 ? cumTP / cumVol : tp });
-    });
-    return result;
-  },
-
-  supertrend(candles, period = 10, multiplier = 3) {
-    const atrData = this.atr(candles, period);
-    if (!atrData.length) return { up: [], down: [] };
-    const up = [], down = [];
-    let prevUp = 0, prevDown = 0, prevTrend = 1;
-    // Align candle index with ATR
-    const offset = candles.length - atrData.length;
-    for (let i = 0; i < atrData.length; i++) {
-      const ci = i + offset;
-      const hl2 = (candles[ci].high + candles[ci].low) / 2;
-      let upperBand = hl2 + multiplier * atrData[i].value;
-      let lowerBand = hl2 - multiplier * atrData[i].value;
-      if (i > 0) {
-        upperBand = upperBand < prevUp || candles[ci - 1 + offset]?.close > prevUp ? upperBand : prevUp;
-        lowerBand = lowerBand > prevDown || candles[ci - 1 + offset]?.close < prevDown ? lowerBand : prevDown;
-      }
-      let trend = prevTrend;
-      if (candles[ci].close > upperBand) trend = 1;
-      else if (candles[ci].close < lowerBand) trend = -1;
-      if (trend === 1) {
-        up.push({ time: candles[ci].time, value: lowerBand });
-        down.push({ time: candles[ci].time, value: NaN });
-      } else {
-        down.push({ time: candles[ci].time, value: upperBand });
-        up.push({ time: candles[ci].time, value: NaN });
-      }
-      prevUp = upperBand; prevDown = lowerBand; prevTrend = trend;
-    }
-    return { up: up.filter(v => !isNaN(v.value)), down: down.filter(v => !isNaN(v.value)) };
-  },
-
-  heikinAshi(candles) {
-    if (!candles.length) return [];
-    const ha = [];
-    for (let i = 0; i < candles.length; i++) {
-      const c = candles[i];
-      const prevHA = i > 0 ? ha[i - 1] : { open: c.open, close: c.close };
-      const haClose = (c.open + c.high + c.low + c.close) / 4;
-      const haOpen = (prevHA.open + prevHA.close) / 2;
-      const haHigh = Math.max(c.high, haOpen, haClose);
-      const haLow = Math.min(c.low, haOpen, haClose);
-      ha.push({ time: c.time, open: haOpen, high: haHigh, low: haLow, close: haClose, volume: c.volume });
-    }
-    return ha;
-  },
-
-  getLatestValues(candles) {
-    if (candles.length < 30) return null;
-    const last = arr => arr.length ? arr[arr.length - 1].value : null;
-    const prev = arr => arr.length > 1 ? arr[arr.length - 2].value : null;
-    const rsiData = this.rsi(candles);
-    const macdData = this.macd(candles);
-    const bb = this.bollingerBands(candles);
-    const sma50 = this.sma(candles, 50);
-    const sma200 = this.sma(candles, 200);
-    return {
-      price: candles[candles.length - 1].close,
-      rsi: last(rsiData),
-      macd: last(macdData.macdLine),
-      macdSignal: last(macdData.signalLine),
-      macdPrev: prev(macdData.macdLine),
-      macdSignalPrev: prev(macdData.signalLine),
-      bbUpper: last(bb.upper),
-      bbLower: last(bb.lower),
-      sma50: last(sma50),
-      sma200: last(sma200),
-      sma50Prev: prev(sma50),
-      sma200Prev: prev(sma200)
+  // Map our timeframe to TradingView interval
+  toTVInterval(timeframe) {
+    const map = {
+      '1m': '1', '5m': '5', '15m': '15', '1h': '60',
+      '2h': '120', '4h': '240', '1D': 'D', '3D': '3D',
+      '1W': 'W', '1M': 'M'
     };
+    return map[timeframe] || 'D';
+  },
+
+  load(symbol, market, timeframe) {
+    const container = document.getElementById('tv-widget-container');
+    if (!container) return;
+    // Clear previous widget
+    container.innerHTML = '';
+
+    const tvSymbol = this.toTVSymbol(symbol, market);
+    const tvInterval = this.toTVInterval(timeframe || AppState.currentTimeframe);
+
+    try {
+      this.widget = new TradingView.widget({
+        container_id: 'tv-widget-container',
+        autosize: true,
+        symbol: tvSymbol,
+        interval: tvInterval,
+        timezone: 'Asia/Kolkata',
+        theme: AppState.currentTheme === 'light' ? 'light' : 'dark',
+        style: '1', // candlestick
+        locale: 'en',
+        toolbar_bg: '#1a1a2e',
+        enable_publishing: false,
+        allow_symbol_change: true,
+        save_image: true,
+        hide_top_toolbar: false,
+        hide_legend: false,
+        hide_side_toolbar: false,
+        withdateranges: true,
+        details: true,
+        hotlist: false,
+        calendar: false,
+        studies: ['Volume@tv-basicstudies'],
+        show_popup_button: true,
+        popup_width: '1000',
+        popup_height: '650',
+        support_host: 'https://www.tradingview.com'
+      });
+    } catch(e) {
+      console.error('TradingView widget error:', e);
+      container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:16px;">Failed to load chart. Please refresh.</div>';
+    }
   }
 };
 
-// ==================== CHART MANAGER ====================
+// Stubs for compatibility — old modules are replaced by TradingView widget
 const ChartManager = {
-  baseOptions(container) {
-    return {
-      width: container.clientWidth,
-      height: container.clientHeight,
-      layout: { background: { type: 'solid', color: '#0b0e11' }, textColor: '#8b949e', fontSize: 11 },
-      grid: {
-        vertLines: { color: 'rgba(45,51,72,0.5)' },
-        horzLines: { color: 'rgba(45,51,72,0.5)' }
-      },
-      crosshair: {
-        mode: LightweightCharts.CrosshairMode.Normal,
-        vertLine: { color: 'rgba(224,227,235,0.2)', labelBackgroundColor: '#2d3348' },
-        horzLine: { color: 'rgba(224,227,235,0.2)', labelBackgroundColor: '#2d3348' }
-      },
-      rightPriceScale: { borderColor: '#2d3348', scaleMargins: { top: 0.1, bottom: 0.1 } },
-      timeScale: { borderColor: '#2d3348', timeVisible: true, secondsVisible: false },
-      handleScroll: { vertTouchDrag: false }
-    };
-  },
-
-  init() {
-    const mainContainer = document.getElementById('main-chart-container');
-    const rsiContainer = document.getElementById('rsi-chart-container');
-    const macdContainer = document.getElementById('macd-chart-container');
-    const volContainer = document.getElementById('volume-chart-container');
-
-    // Main chart
-    AppState.charts.main = LightweightCharts.createChart(mainContainer, this.baseOptions(mainContainer));
-    AppState.series.candlestick = AppState.charts.main.addCandlestickSeries({
-      upColor: '#26a69a', downColor: '#ef5350',
-      borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a', wickDownColor: '#ef5350'
-    });
-
-    // RSI chart
-    AppState.charts.rsi = LightweightCharts.createChart(rsiContainer, {
-      ...this.baseOptions(rsiContainer), height: 120,
-      rightPriceScale: { borderColor: '#2d3348', scaleMargins: { top: 0.1, bottom: 0.1 } }
-    });
-    AppState.series.rsi = AppState.charts.rsi.addLineSeries({ color: '#f5c842', lineWidth: 2 });
-    // RSI reference lines
-    AppState.series.rsi.createPriceLine({ price: 70, color: 'rgba(239,83,80,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '70' });
-    AppState.series.rsi.createPriceLine({ price: 30, color: 'rgba(38,166,154,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '30' });
-
-    // MACD chart
-    AppState.charts.macd = LightweightCharts.createChart(macdContainer, {
-      ...this.baseOptions(macdContainer), height: 120,
-      rightPriceScale: { borderColor: '#2d3348', scaleMargins: { top: 0.2, bottom: 0.2 } }
-    });
-    AppState.series.macdLine = AppState.charts.macd.addLineSeries({ color: '#42a5f5', lineWidth: 2 });
-    AppState.series.macdSignal = AppState.charts.macd.addLineSeries({ color: '#ef5350', lineWidth: 1 });
-    AppState.series.macdHist = AppState.charts.macd.addHistogramSeries({});
-
-    // Volume chart
-    AppState.charts.volume = LightweightCharts.createChart(volContainer, {
-      ...this.baseOptions(volContainer), height: 80,
-      rightPriceScale: { borderColor: '#2d3348', scaleMargins: { top: 0.1, bottom: 0 } }
-    });
-    AppState.series.volume = AppState.charts.volume.addHistogramSeries({
-      priceFormat: { type: 'volume' }, priceScaleId: 'right'
-    });
-
-    // Stochastic RSI chart
-    const stochContainer = document.getElementById('stoch-chart-container');
-    AppState.charts.stoch = LightweightCharts.createChart(stochContainer, {
-      ...this.baseOptions(stochContainer), height: 120,
-      rightPriceScale: { borderColor: '#2d3348', scaleMargins: { top: 0.1, bottom: 0.1 } }
-    });
-    AppState.series.stochK = AppState.charts.stoch.addLineSeries({ color: '#42a5f5', lineWidth: 2 });
-    AppState.series.stochD = AppState.charts.stoch.addLineSeries({ color: '#ff7043', lineWidth: 1 });
-    AppState.series.stochK.createPriceLine({ price: 80, color: 'rgba(239,83,80,0.3)', lineWidth: 1, lineStyle: 2, title: '80' });
-    AppState.series.stochK.createPriceLine({ price: 20, color: 'rgba(38,166,154,0.3)', lineWidth: 1, lineStyle: 2, title: '20' });
-
-    // ATR chart
-    const atrContainer = document.getElementById('atr-chart-container');
-    AppState.charts.atr = LightweightCharts.createChart(atrContainer, {
-      ...this.baseOptions(atrContainer), height: 100,
-      rightPriceScale: { borderColor: '#2d3348', scaleMargins: { top: 0.1, bottom: 0.1 } }
-    });
-    AppState.series.atr = AppState.charts.atr.addLineSeries({ color: '#ce93d8', lineWidth: 2 });
-
-    // Overlay series on main chart
-    this.createOverlays();
-    this.syncTimeScales();
-    this.setupCrosshair();
-    window.addEventListener('resize', () => this.handleResize());
-    this.handleResize();
-  },
-
-  showLoading(text) {
-    const overlay = document.getElementById('chart-loading');
-    const label = document.getElementById('chart-loading-text');
-    if (label) label.textContent = text || 'Loading...';
-    if (overlay) overlay.classList.remove('hidden');
-    const errOv = document.getElementById('chart-error');
-    if (errOv) errOv.classList.add('hidden');
-  },
-  hideLoading() {
-    const overlay = document.getElementById('chart-loading');
-    if (overlay) overlay.classList.add('hidden');
-  },
-
-  createOverlays() {
-    const c = AppState.charts.main;
-    const s = AppState.series;
-    s.sma20 = c.addLineSeries({ color: '#f5c842', lineWidth: 1, visible: false });
-    s.sma50 = c.addLineSeries({ color: '#42a5f5', lineWidth: 1, visible: false });
-    s.sma200 = c.addLineSeries({ color: '#ab47bc', lineWidth: 1, visible: false });
-    s.ema12 = c.addLineSeries({ color: '#ff7043', lineWidth: 1, visible: false });
-    s.ema26 = c.addLineSeries({ color: '#66bb6a', lineWidth: 1, visible: false });
-    s.bbUpper = c.addLineSeries({ color: '#7e57c2', lineWidth: 1, lineStyle: 2, visible: false });
-    s.bbMiddle = c.addLineSeries({ color: '#7e57c2', lineWidth: 1, visible: false });
-    s.bbLower = c.addLineSeries({ color: '#7e57c2', lineWidth: 1, lineStyle: 2, visible: false });
-    s.vwap = c.addLineSeries({ color: '#e040fb', lineWidth: 2, lineStyle: 0, visible: false });
-    s.supertrendUp = c.addLineSeries({ color: '#26a69a', lineWidth: 2, visible: false });
-    s.supertrendDown = c.addLineSeries({ color: '#ef5350', lineWidth: 2, visible: false });
-  },
-
-  syncTimeScales() {
-    const charts = [AppState.charts.main, AppState.charts.rsi, AppState.charts.macd, AppState.charts.volume, AppState.charts.stoch, AppState.charts.atr];
-    let syncing = false;
-    charts.forEach((chart, idx) => {
-      if (!chart) return;
-      chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (syncing) return;
-        syncing = true;
-        charts.forEach((other, oidx) => {
-          if (oidx !== idx && other) other.timeScale().setVisibleLogicalRange(range);
-        });
-        syncing = false;
-        TrendlineManager.render();
-      });
-    });
-  },
-
-  setupCrosshair() {
-    AppState.charts.main.subscribeCrosshairMove(param => {
-      if (param.time && param.point) {
-        AppState.crosshairPos.time = param.time;
-        const data = param.seriesData.get(AppState.series.candlestick);
-        if (data) {
-          AppState.crosshairPos.price = data.close || data.value;
-          // Update OHLC info when hovering
-          const ohlcEl = document.getElementById('info-ohlc');
-          if (ohlcEl && data.open) {
-            ohlcEl.innerHTML = `<span>O</span><b>${fmt(data.open)}</b><span>H</span><b>${fmt(data.high)}</b><span>L</span><b>${fmt(data.low)}</b><span>C</span><b>${fmt(data.close)}</b>`;
-          }
-        }
-      }
-      if (AppState.drawingMode === 'trendline' && AppState.drawingStart) {
-        TrendlineManager.renderPreview(param);
-      }
-    });
-  },
-
-  handleResize() {
-    const chartArea = document.getElementById('chart-area');
-    const w = chartArea.clientWidth;
-    const infoBar = document.querySelector('.chart-info-bar');
-    const infoH = infoBar ? infoBar.offsetHeight : 28;
-    let usedH = infoH;
-    const subs = [
-      { chart: AppState.charts.rsi, container: 'rsi-chart-container', h: 120 },
-      { chart: AppState.charts.macd, container: 'macd-chart-container', h: 120 },
-      { chart: AppState.charts.volume, container: 'volume-chart-container', h: 80 },
-      { chart: AppState.charts.stoch, container: 'stoch-chart-container', h: 120 },
-      { chart: AppState.charts.atr, container: 'atr-chart-container', h: 100 },
-    ];
-    subs.forEach(s => {
-      const el = document.getElementById(s.container);
-      if (!el.classList.contains('hidden')) {
-        usedH += s.h;
-        s.chart.resize(w, s.h);
-      }
-    });
-    const mainH = chartArea.clientHeight - usedH;
-    AppState.charts.main.resize(w, Math.max(mainH, 200));
-    // Resize trendline canvas
-    const canvas = document.getElementById('trendline-canvas');
-    canvas.width = w;
-    canvas.height = Math.max(mainH, 200);
-    TrendlineManager.render();
-  },
-
-  updateChartData(candles) {
-    AppState.candles = candles;
-    const displayData = AppState.chartType === 'heikinashi' ? Indicators.heikinAshi(candles) : candles;
-    if (AppState.chartType === 'line' || AppState.chartType === 'area') {
-      // For line/area, we set data on a line series; hide candlestick
-      AppState.series.candlestick.setData([]);
-      if (!AppState.series.lineOverlay) {
-        AppState.series.lineOverlay = AppState.charts.main.addAreaSeries({
-          topColor: AppState.chartType === 'area' ? 'rgba(41,98,255,0.3)' : 'transparent',
-          bottomColor: 'transparent',
-          lineColor: '#2962ff', lineWidth: 2
-        });
-      }
-      AppState.series.lineOverlay.applyOptions({
-        topColor: AppState.chartType === 'area' ? 'rgba(41,98,255,0.3)' : 'transparent',
-      });
-      AppState.series.lineOverlay.setData(candles.map(c => ({ time: c.time, value: c.close })));
-    } else {
-      if (AppState.series.lineOverlay) {
-        AppState.series.lineOverlay.setData([]);
-      }
-      AppState.series.candlestick.setData(displayData);
-    }
-    this.updateIndicators();
-    if (candles.length > 0) {
-      const last = candles[candles.length - 1];
-      UIController.updateChartInfoBar(last);
-    }
-    // Show all candles in view (not just last 10 bars)
-    if (AppState.charts.main) {
-      AppState.charts.main.timeScale().fitContent();
-    }
-  },
-
-  updateIndicators() {
-    const c = AppState.candles;
-    const s = AppState.series;
-    const active = AppState.activeIndicators;
-
-    // SMA
-    const showSMA = active.has('sma');
-    s.sma20.applyOptions({ visible: showSMA });
-    s.sma50.applyOptions({ visible: showSMA });
-    s.sma200.applyOptions({ visible: showSMA });
-    if (showSMA) {
-      s.sma20.setData(Indicators.sma(c, 20));
-      s.sma50.setData(Indicators.sma(c, 50));
-      if (c.length >= 200) s.sma200.setData(Indicators.sma(c, 200));
-    }
-
-    // EMA
-    const showEMA = active.has('ema');
-    s.ema12.applyOptions({ visible: showEMA });
-    s.ema26.applyOptions({ visible: showEMA });
-    if (showEMA) {
-      s.ema12.setData(Indicators.ema(c, 12));
-      s.ema26.setData(Indicators.ema(c, 26));
-    }
-
-    // BB
-    const showBB = active.has('bb');
-    s.bbUpper.applyOptions({ visible: showBB });
-    s.bbMiddle.applyOptions({ visible: showBB });
-    s.bbLower.applyOptions({ visible: showBB });
-    if (showBB) {
-      const bb = Indicators.bollingerBands(c);
-      s.bbUpper.setData(bb.upper);
-      s.bbMiddle.setData(bb.middle);
-      s.bbLower.setData(bb.lower);
-    }
-
-    // RSI
-    const rsiEl = document.getElementById('rsi-chart-container');
-    if (active.has('rsi')) {
-      rsiEl.classList.remove('hidden');
-      s.rsi.setData(Indicators.rsi(c));
-    } else {
-      rsiEl.classList.add('hidden');
-    }
-
-    // MACD
-    const macdEl = document.getElementById('macd-chart-container');
-    if (active.has('macd')) {
-      macdEl.classList.remove('hidden');
-      const macd = Indicators.macd(c);
-      s.macdLine.setData(macd.macdLine);
-      s.macdSignal.setData(macd.signalLine);
-      s.macdHist.setData(macd.histogram);
-    } else {
-      macdEl.classList.add('hidden');
-    }
-
-    // Volume
-    const volEl = document.getElementById('volume-chart-container');
-    if (active.has('volume')) {
-      volEl.classList.remove('hidden');
-      s.volume.setData(Indicators.volume(c));
-    } else {
-      volEl.classList.add('hidden');
-    }
-
-    // VWAP overlay
-    const showVWAP = active.has('vwap');
-    s.vwap.applyOptions({ visible: showVWAP });
-    if (showVWAP) s.vwap.setData(Indicators.vwap(c));
-
-    // Supertrend overlay
-    const showST = active.has('supertrend');
-    s.supertrendUp.applyOptions({ visible: showST });
-    s.supertrendDown.applyOptions({ visible: showST });
-    if (showST) {
-      const st = Indicators.supertrend(c);
-      s.supertrendUp.setData(st.up);
-      s.supertrendDown.setData(st.down);
-    }
-
-    // Stochastic RSI
-    const stochEl = document.getElementById('stoch-chart-container');
-    if (active.has('stoch')) {
-      stochEl.classList.remove('hidden');
-      const stochData = Indicators.stochasticRSI(c);
-      s.stochK.setData(stochData.k);
-      s.stochD.setData(stochData.d);
-    } else {
-      stochEl.classList.add('hidden');
-    }
-
-    // ATR
-    const atrEl = document.getElementById('atr-chart-container');
-    if (active.has('atr')) {
-      atrEl.classList.remove('hidden');
-      s.atr.setData(Indicators.atr(c));
-    } else {
-      atrEl.classList.add('hidden');
-    }
-
-    this.handleResize();
-  },
-
-  updateLastCandle(candle) {
-    // Update or append to candles array
-    const candles = AppState.candles;
-    if (candles.length > 0 && candles[candles.length - 1].time === candle.time) {
-      candles[candles.length - 1] = candle;
-    } else if (candle.time > (candles.length ? candles[candles.length - 1].time : 0)) {
-      candles.push(candle);
-    }
-    AppState.series.candlestick.update(candle);
-
-    // Update volume
-    if (AppState.activeIndicators.has('volume')) {
-      AppState.series.volume.update({
-        time: candle.time, value: candle.volume,
-        color: candle.close >= candle.open ? 'rgba(38,166,154,0.4)' : 'rgba(239,83,80,0.4)'
-      });
-    }
-
-    UIController.updateChartInfoBar(candle);
-    AppState.tickCount++;
-
-    // Check alerts every tick for price, every 5 for indicators
-    AlertManager.checkAlerts(candle.close, candle.time);
-
-    // Recompute indicators every 5th tick
-    if (AppState.tickCount % 5 === 0) {
-      this.updateIndicators();
-    }
-  }
+  init() {},
+  showLoading() {},
+  hideLoading() {},
+  updateChartData() {},
+  updateIndicators() {},
+  updateLastCandle() {}
 };
+const TrendlineManager = { init() {}, render() {} };
 
-// ==================== TRENDLINE MANAGER ====================
-const TrendlineManager = {
-  init() {
-    const canvas = document.getElementById('trendline-canvas');
-    const container = document.getElementById('main-chart-container');
-
-    canvas.addEventListener('click', (e) => {
-      if (!AppState.drawingMode) return;
-      if (AppState.drawingMode === 'trendline') this.handleTrendlineClick(e);
-      else if (AppState.drawingMode === 'hline') this.handleHLineClick(e);
-      else if (AppState.drawingMode === 'fib') this.handleFibClick(e);
-    });
-
-    canvas.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      this.handleRightClick(e);
-    });
-
-    // Re-render on chart scroll
-    AppState.charts.main.timeScale().subscribeVisibleTimeRangeChange(() => this.render());
-  },
-
-  handleTrendlineClick(e) {
-    const pos = this.getChartPosition(e);
-    if (!pos) return;
-
-    if (!AppState.drawingStart) {
-      // First click
-      AppState.drawingStart = { time: pos.time, price: pos.price };
-    } else {
-      // Second click - finalize
-      const tl = {
-        id: 'tl_' + Date.now(),
-        symbol: AppState.currentSymbol,
-        startTime: AppState.drawingStart.time,
-        startPrice: AppState.drawingStart.price,
-        endTime: pos.time,
-        endPrice: pos.price,
-        color: '#ffd54f',
-        width: 2,
-        extended: true
-      };
-      AppState.trendlines.push(tl);
-      AppState.drawingStart = null;
-      AppState.drawingMode = null;
-      document.getElementById('trendline-canvas').classList.remove('drawing');
-      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-      Storage.save();
-      this.render();
-      UIController.updateTrendlineSelect();
-    }
-  },
-
-  handleHLineClick(e) {
-    const pos = this.getChartPosition(e);
-    if (!pos) return;
-    AppState.series.candlestick.createPriceLine({
-      price: pos.price,
-      color: '#42a5f5',
-      lineWidth: 1,
-      lineStyle: 2,
-      axisLabelVisible: true,
-      title: `H-Line ${fmt(pos.price)}`
-    });
-    AppState.drawingMode = null;
-    document.getElementById('trendline-canvas').classList.remove('drawing');
-    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-  },
-
-  handleFibClick(e) {
-    const pos = this.getChartPosition(e);
-    if (!pos) return;
-    if (!AppState.fibStart) {
-      AppState.fibStart = { time: pos.time, price: pos.price };
-    } else {
-      // Draw Fibonacci retracement levels as horizontal price lines
-      const high = Math.max(AppState.fibStart.price, pos.price);
-      const low = Math.min(AppState.fibStart.price, pos.price);
-      const diff = high - low;
-      const levels = [
-        { ratio: 0, color: '#787b86' }, { ratio: 0.236, color: '#f44336' },
-        { ratio: 0.382, color: '#ff9800' }, { ratio: 0.5, color: '#4caf50' },
-        { ratio: 0.618, color: '#2196f3' }, { ratio: 0.786, color: '#9c27b0' },
-        { ratio: 1, color: '#787b86' }
-      ];
-      levels.forEach(l => {
-        const price = high - diff * l.ratio;
-        AppState.series.candlestick.createPriceLine({
-          price, color: l.color, lineWidth: 1, lineStyle: 2,
-          axisLabelVisible: true, title: `Fib ${(l.ratio * 100).toFixed(1)}% — ${fmt(price)}`
-        });
-      });
-      AppState.fibStart = null;
-      AppState.drawingMode = null;
-      document.getElementById('trendline-canvas').classList.remove('drawing');
-      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-    }
-  },
-
-  getChartPosition(e) {
-    const chart = AppState.charts.main;
-    const series = AppState.series.candlestick;
-    const container = document.getElementById('main-chart-container');
-    const rect = container.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const time = chart.timeScale().coordinateToTime(x);
-    const price = series.coordinateToPrice(y);
-    if (time == null || price == null) return null;
-    return { time, price };
-  },
-
-  renderPreview(param) {
-    if (!AppState.drawingStart || !param.point) return;
-    const canvas = document.getElementById('trendline-canvas');
-    const ctx = canvas.getContext('2d');
-    const chart = AppState.charts.main;
-    const series = AppState.series.candlestick;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // Draw existing trendlines first
-    this.drawAllTrendlines(ctx);
-
-    // Draw preview line
-    const sx = chart.timeScale().timeToCoordinate(AppState.drawingStart.time);
-    const sy = series.priceToCoordinate(AppState.drawingStart.price);
-    if (sx == null || sy == null) return;
-    ctx.beginPath();
-    ctx.strokeStyle = '#ffd54f';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 5]);
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(param.point.x, param.point.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  },
-
-  render() {
-    const canvas = document.getElementById('trendline-canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    this.drawAllTrendlines(ctx);
-  },
-
-  drawAllTrendlines(ctx) {
-    const chart = AppState.charts.main;
-    const series = AppState.series.candlestick;
-    const symbolTLs = AppState.trendlines.filter(tl => tl.symbol === AppState.currentSymbol);
-
-    symbolTLs.forEach(tl => {
-      let sx = chart.timeScale().timeToCoordinate(tl.startTime);
-      let sy = series.priceToCoordinate(tl.startPrice);
-      let ex = chart.timeScale().timeToCoordinate(tl.endTime);
-      let ey = series.priceToCoordinate(tl.endPrice);
-
-      if (sx == null || sy == null || ex == null || ey == null) return;
-
-      ctx.beginPath();
-      ctx.strokeStyle = tl.color || '#ffd54f';
-      ctx.lineWidth = tl.width || 2;
-
-      if (tl.extended) {
-        // Extend line to canvas edges
-        const dx = ex - sx;
-        const dy = ey - sy;
-        if (dx !== 0) {
-          const slope = dy / dx;
-          const extStartX = 0;
-          const extStartY = sy - sx * slope;
-          const extEndX = ctx.canvas.width;
-          const extEndY = sy + (extEndX - sx) * slope;
-          ctx.moveTo(extStartX, extStartY);
-          ctx.lineTo(extEndX, extEndY);
-        } else {
-          ctx.moveTo(sx, 0);
-          ctx.lineTo(sx, ctx.canvas.height);
-        }
-      } else {
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(ex, ey);
-      }
-      ctx.stroke();
-
-      // Draw endpoints
-      [{ x: sx, y: sy }, { x: ex, y: ey }].forEach(p => {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = tl.color || '#ffd54f';
-        ctx.fill();
-      });
-    });
-  },
-
-  handleRightClick(e) {
-    const chart = AppState.charts.main;
-    const series = AppState.series.candlestick;
-    const container = document.getElementById('main-chart-container');
-    const rect = container.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    // Find nearest trendline
-    const symbolTLs = AppState.trendlines.filter(tl => tl.symbol === AppState.currentSymbol);
-    let nearestTL = null;
-    let nearestDist = 15; // 15px threshold
-
-    symbolTLs.forEach(tl => {
-      const sx = chart.timeScale().timeToCoordinate(tl.startTime);
-      const sy = series.priceToCoordinate(tl.startPrice);
-      const ex = chart.timeScale().timeToCoordinate(tl.endTime);
-      const ey = series.priceToCoordinate(tl.endPrice);
-      if (sx == null || sy == null || ex == null || ey == null) return;
-      const dist = this.distToSegment(mx, my, sx, sy, ex, ey);
-      if (dist < nearestDist) { nearestDist = dist; nearestTL = tl; }
-    });
-
-    if (nearestTL) {
-      this.showContextMenu(e.clientX, e.clientY, nearestTL);
-    }
-  },
-
-  distToSegment(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1, dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    let t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-    const projX = x1 + t * dx, projY = y1 + t * dy;
-    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
-  },
-
-  showContextMenu(x, y, tl) {
-    const menu = document.getElementById('context-menu');
-    menu.innerHTML = `
-      <div class="context-menu-item danger" data-action="delete" data-id="${tl.id}">🗑 Delete Trendline</div>
-      <div class="context-menu-item" data-action="toggle-extend" data-id="${tl.id}">${tl.extended ? '↩ Unextend' : '↗ Extend to edges'}</div>
-    `;
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-    menu.classList.remove('hidden');
-    menu.onclick = (e) => {
-      const item = e.target.closest('.context-menu-item');
-      if (!item) return;
-      const action = item.dataset.action;
-      const id = item.dataset.id;
-      if (action === 'delete') {
-        AppState.trendlines = AppState.trendlines.filter(t => t.id !== id);
-        Storage.save();
-        UIController.updateTrendlineSelect();
-      } else if (action === 'toggle-extend') {
-        const found = AppState.trendlines.find(t => t.id === id);
-        if (found) found.extended = !found.extended;
-        Storage.save();
-      }
-      menu.classList.add('hidden');
-      this.render();
-    };
-    // Close on click outside
-    setTimeout(() => {
-      document.addEventListener('click', function closeMenu() {
-        menu.classList.add('hidden');
-        document.removeEventListener('click', closeMenu);
-      }, { once: true });
-    }, 10);
-  },
-
-  // Get trendline price at a given time (for alert checking)
-  getPriceAtTime(tl, time) {
-    if (tl.endTime === tl.startTime) return tl.startPrice;
-    return tl.startPrice + (tl.endPrice - tl.startPrice) * (time - tl.startTime) / (tl.endTime - tl.startTime);
-  }
-};
+// (Old Indicators, ChartManager, TrendlineManager code removed — TV widget handles all chart functionality)
 
 // ==================== ALERT MANAGER ====================
 const AlertManager = {
@@ -2546,91 +1698,11 @@ const UIController = {
       });
     });
 
-    // Timeframe buttons
-    const tfBar = document.getElementById('timeframe-bar');
-    ['1m', '5m', '15m', '1h', '2h', '4h', '1D', '3D', '1W', '1M'].forEach(tf => {
-      const btn = document.createElement('button');
-      btn.className = `tf-btn ${tf === AppState.currentTimeframe ? 'active' : ''}`;
-      btn.textContent = tf;
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        AppState.currentTimeframe = tf;
-        Storage.save();
-        App.loadChartData();
-        if (AppState.currentMarket === 'crypto') App.connectRealtime();
-      });
-      tfBar.appendChild(btn);
-    });
+    // (Timeframe buttons removed — TradingView widget has its own)
 
-    // Indicator dropdown
-    const indIndicators = [
-      { key: 'sma', label: 'SMA', desc: 'Simple Moving Average' },
-      { key: 'ema', label: 'EMA', desc: 'Exponential MA' },
-      { key: 'bb', label: 'BB', desc: 'Bollinger Bands' },
-      { key: 'rsi', label: 'RSI', desc: 'Relative Strength Index' },
-      { key: 'macd', label: 'MACD', desc: 'MACD' },
-      { key: 'volume', label: 'VOL', desc: 'Volume' },
-      { key: 'stoch', label: 'SRSI', desc: 'Stochastic RSI' },
-      { key: 'atr', label: 'ATR', desc: 'Average True Range' },
-      { key: 'vwap', label: 'VWAP', desc: 'Vol Weighted Avg Price' },
-      { key: 'supertrend', label: 'ST', desc: 'Supertrend' }
-    ];
-    const indPanel = document.getElementById('ind-dropdown-panel');
-    const indBtn = document.getElementById('ind-dropdown-btn');
-    function updateIndDropdownLabel() {
-      const count = AppState.activeIndicators.size;
-      indBtn.textContent = count > 0 ? `Indicators (${count}) ▾` : 'Indicators ▾';
-      indBtn.classList.toggle('has-active', count > 0);
-    }
-    indIndicators.forEach(ind => {
-      const item = document.createElement('div');
-      item.className = 'ind-dropdown-item' + (AppState.activeIndicators.has(ind.key) ? ' active' : '');
-      item.dataset.ind = ind.key;
-      item.innerHTML = `<span class="ind-check"></span><span><b>${ind.label}</b> ${ind.desc}</span>`;
-      item.addEventListener('click', () => {
-        if (AppState.activeIndicators.has(ind.key)) {
-          AppState.activeIndicators.delete(ind.key);
-          item.classList.remove('active');
-        } else {
-          AppState.activeIndicators.add(ind.key);
-          item.classList.add('active');
-        }
-        Storage.save();
-        ChartManager.updateIndicators();
-        updateIndDropdownLabel();
-      });
-      indPanel.appendChild(item);
-    });
-    updateIndDropdownLabel();
-    // Toggle dropdown open/close
-    indBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      indPanel.classList.toggle('open');
-    });
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#ind-dropdown')) indPanel.classList.remove('open');
-    });
+    // (Indicator dropdown removed — TradingView widget has its own)
 
-    // Drawing tools
-    document.querySelectorAll('.tool-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tool = btn.dataset.tool;
-        const canvas = document.getElementById('trendline-canvas');
-        if (AppState.drawingMode === tool) {
-          AppState.drawingMode = null;
-          AppState.drawingStart = null;
-          canvas.classList.remove('drawing');
-          btn.classList.remove('active');
-        } else {
-          AppState.drawingMode = tool;
-          AppState.drawingStart = null;
-          canvas.classList.add('drawing');
-          document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-        }
-      });
-    });
+    // (Drawing tools removed — TradingView widget has its own)
 
     // Alert form toggle
     document.getElementById('btn-toggle-alert-form').addEventListener('click', () => {
@@ -2750,41 +1822,7 @@ const UIController = {
       document.getElementById('search-input').focus();
     });
 
-    // Theme modal
-    document.getElementById('btn-theme').addEventListener('click', () => {
-      document.getElementById('theme-modal').classList.remove('hidden');
-    });
-    document.querySelectorAll('.theme-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const theme = card.dataset.theme;
-        AppState.currentTheme = theme;
-        applyTheme(theme);
-        document.querySelectorAll('.theme-card').forEach(c => c.style.borderColor = 'transparent');
-        card.style.borderColor = 'var(--accent-blue)';
-        Storage.save();
-      });
-    });
-    document.getElementById('btn-apply-custom-colors').addEventListener('click', () => {
-      const bull = document.getElementById('custom-bullish').value;
-      const bear = document.getElementById('custom-bearish').value;
-      const bg = document.getElementById('custom-bg').value;
-      AppState.series.candlestick.applyOptions({
-        upColor: bull, downColor: bear, borderUpColor: bull, borderDownColor: bear,
-        wickUpColor: bull, wickDownColor: bear
-      });
-      AppState.charts.main.applyOptions({ layout: { background: { type: 'solid', color: bg } } });
-      document.getElementById('theme-modal').classList.add('hidden');
-    });
-
-    // Screenshot
-    document.getElementById('btn-screenshot').addEventListener('click', () => {
-      takeScreenshot();
-    });
-
-    // Hotkeys modal
-    document.getElementById('btn-hotkeys').addEventListener('click', () => {
-      document.getElementById('hotkeys-modal').classList.remove('hidden');
-    });
+    // (Theme, screenshot, hotkeys buttons removed — no longer in toolbar)
 
     // Market toggle active state
     const activeMarketBtn = document.querySelector(`.market-btn[data-market="${AppState.currentMarket}"]`);
@@ -2793,25 +1831,15 @@ const UIController = {
       activeMarketBtn.classList.add('active');
     }
 
-    // ESC key to cancel drawing + hotkeys
+    // ESC key to close menus + hotkeys
     document.addEventListener('keydown', (e) => {
       // Don't fire hotkeys when typing in inputs
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
       if (e.key === 'Escape') {
-        AppState.drawingMode = null;
-        AppState.drawingStart = null;
-        AppState.fibStart = null;
-        document.getElementById('trendline-canvas').classList.remove('drawing');
-        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('context-menu').classList.add('hidden');
         document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
-        TrendlineManager.render();
       }
-      if (e.key === 't' || e.key === 'T') activateTool('trendline');
-      if (e.key === 'h' || e.key === 'H') activateTool('hline');
-      if (e.key === 'f' || e.key === 'F') activateTool('fib');
-      if (e.key === 's' || e.key === 'S') takeScreenshot();
       if (e.key === 'a' || e.key === 'A') {
         document.getElementById('alert-form').classList.remove('hidden');
         UIController.updateTrendlineSelect();
@@ -2820,18 +1848,8 @@ const UIController = {
         e.preventDefault();
         document.getElementById('search-input').focus();
       }
-      // Number keys for timeframes
-      const tfKeys = { '1': '1m', '2': '5m', '3': '15m', '4': '1h', '5': '4h', '6': '1D', '7': '1W' };
-      if (tfKeys[e.key]) {
-        const tf = tfKeys[e.key];
-        document.querySelectorAll('.tf-btn').forEach(b => {
-          b.classList.toggle('active', b.textContent === tf);
-        });
-        AppState.currentTimeframe = tf;
-        Storage.save();
-        App.loadChartData();
-        if (AppState.currentMarket === 'crypto') App.connectRealtime();
-      }
+      // (Timeframe number keys removed — TradingView widget has its own)
+      // (Drawing tool hotkeys removed — TradingView widget has its own)
     });
   }
 };
@@ -2851,52 +1869,13 @@ function applyTheme(name) {
   r.setProperty('--color-bullish', t.bullish);
   r.setProperty('--color-bearish', t.bearish);
   r.setProperty('--accent-blue', t.accent);
-  // Update chart colors
-  const chartOpts = { layout: { background: { type: 'solid', color: t.bg }, textColor: t.textSec }, grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } } };
-  Object.values(AppState.charts).forEach(c => { if (c) c.applyOptions(chartOpts); });
-  AppState.series.candlestick.applyOptions({
-    upColor: t.bullish, downColor: t.bearish,
-    borderUpColor: t.bullish, borderDownColor: t.bearish,
-    wickUpColor: t.bullish, wickDownColor: t.bearish
-  });
-}
-
-// ==================== SCREENSHOT ====================
-function takeScreenshot() {
-  try {
-    const canvas = AppState.charts.main.takeScreenshot();
-    const link = document.createElement('a');
-    link.download = `TradeViewPro_${AppState.currentSymbol}_${new Date().toISOString().slice(0,10)}.png`;
-    link.href = canvas.toDataURL();
-    link.click();
-  } catch(e) { console.warn('Screenshot failed:', e); }
-}
-
-// ==================== TOOL ACTIVATOR ====================
-function activateTool(tool) {
-  const canvas = document.getElementById('trendline-canvas');
-  if (AppState.drawingMode === tool) {
-    AppState.drawingMode = null;
-    AppState.drawingStart = null;
-    AppState.fibStart = null;
-    canvas.classList.remove('drawing');
-    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-  } else {
-    AppState.drawingMode = tool;
-    AppState.drawingStart = null;
-    AppState.fibStart = null;
-    canvas.classList.add('drawing');
-    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-    const btn = document.querySelector(`.tool-btn[data-tool="${tool}"]`);
-    if (btn) btn.classList.add('active');
-  }
+  // TradingView widget handles its own theme via the theme option in TVChart.load
 }
 
 // ==================== MAIN APP ====================
 const App = {
   async init() {
     Storage.restore();
-    await CandleCache.init();
 
     // Parse URL parameters for deep-linking from scanner dashboard
     const urlParams = new URLSearchParams(window.location.search);
@@ -2917,8 +1896,6 @@ const App = {
       }
     }
 
-    ChartManager.init();
-
     // Sync market toggle and symbol display after any URL override
     document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
     const activeMarketBtn = document.querySelector('.market-btn[data-market="' + AppState.currentMarket + '"]');
@@ -2926,21 +1903,17 @@ const App = {
     const infoSym = document.getElementById('info-symbol');
     if (infoSym) infoSym.textContent = AppState.currentSymbol.replace('USDT','').replace('.NS',' (NSE)').replace('.BO',' (BSE)');
 
-    TrendlineManager.init();
     UIController.bindEvents();
     AlertManager.requestPermission();
     UIController.renderWatchlist();
     UIController.renderAlerts();
     UIController.renderAlertHistory();
 
-    await this.loadChartData();
+    // Load chart via TradingView widget (no more manual data fetching for chart)
+    TVChart.load(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
     if (AppState.currentTheme !== 'dark') applyTheme(AppState.currentTheme);
-    if (AppState.currentMarket === 'crypto') this.connectRealtime();
     Watchlist.init();
-    if (AppState.currentMarket === 'stocks') this.startStockChartPolling();
-
-    // Prefetch all watchlist symbols in background so switching is instant
-    this.prefetchWatchlist();
+    if (AppState.currentMarket !== 'crypto') this.startStockChartPolling();
 
     StatusBar.update(false, 'Initializing...');
   },
@@ -2951,153 +1924,27 @@ const App = {
     AppState.prevPrices = {};
     Storage.save();
     UIController.renderWatchlist();
-
-    // Update market toggle
     document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`.market-btn[data-market="${market}"]`);
     if (btn) btn.classList.add('active');
-
-    // Check if we have cached data — if so, skip the fade and show instantly
-    const cached = await CandleCache.get(symbol, market, AppState.currentTimeframe);
-    if (!cached || !cached.candles || cached.candles.length === 0) {
-      // No cache — fade chart while loading
-      const chartArea = document.getElementById('chart-area');
-      if (chartArea) { chartArea.style.transition = 'opacity 0.15s'; chartArea.style.opacity = '0.5'; }
-      if (AppState.series && AppState.series.candlestick) {
-        try { AppState.series.candlestick.setData([]); } catch(e) {}
-      }
-    }
-
-    await this.loadChartData();
+    TVChart.load(symbol, market, AppState.currentTimeframe);
     if (market === 'crypto') {
-      this.connectRealtime();
       if (AppState.stockPollTimer) { clearInterval(AppState.stockPollTimer); AppState.stockPollTimer = null; }
     } else {
-      // NSE, BSE, and US stocks all use Yahoo Finance
       if (AppState.ws) { try { AppState.ws.close(); } catch(e) {} AppState.ws = null; }
       this.startStockChartPolling();
     }
+    const infoSym = document.getElementById('info-symbol');
+    if (infoSym) infoSym.textContent = symbol.replace('USDT','').replace('.NS',' (NSE)').replace('.BO',' (BSE)');
   },
 
   async loadChartData() {
-    const symbol = AppState.currentSymbol;
-    const market = AppState.currentMarket;
-    const timeframe = AppState.currentTimeframe;
-    const sym = symbol.replace('USDT','').replace('.NS','').replace('.BO','');
-    const sources = { crypto: 'Binance', stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
-
-    try {
-      // 1. Try to show cached data IMMEDIATELY (no spinner)
-      const cached = await CandleCache.get(symbol, market, timeframe);
-      if (cached && cached.candles && cached.candles.length > 0) {
-        ChartManager.updateChartData(cached.candles);
-        TrendlineManager.render();
-        StatusBar.update(true, (sources[market] || 'Yahoo Finance') + ' (cached)');
-
-        // If cache is fresh enough, skip network fetch
-        if (!CandleCache.isStale(cached, timeframe)) {
-          return;
-        }
-        // Cache is stale — refresh in background (no spinner)
-        this._backgroundRefresh(symbol, market, timeframe);
-        return;
-      }
-
-      // 2. No cache — full fetch with loading spinner
-      ChartManager.showLoading('Loading ' + sym + ' ' + timeframe + '...');
-      StatusBar.update(false, 'Loading data...');
-      const candles = await API.fetchCandles(symbol, market, timeframe);
-
-      // Verify user hasn't navigated away during fetch
-      if (symbol !== AppState.currentSymbol || timeframe !== AppState.currentTimeframe) return;
-
-      ChartManager.updateChartData(candles);
-      TrendlineManager.render();
-      await CandleCache.put(symbol, market, timeframe, candles);
-      StatusBar.update(true, sources[market] || 'Yahoo Finance');
-    } catch(e) {
-      console.error('Failed to load chart data:', e);
-      // On error, try showing cached data
-      const cached = await CandleCache.get(symbol, market, timeframe);
-      if (cached && cached.candles && cached.candles.length > 0) {
-        ChartManager.updateChartData(cached.candles);
-        StatusBar.update(false, 'Cached data (offline)');
-      } else {
-        const errText = document.getElementById('chart-error-text');
-        if (errText) errText.textContent = 'Failed to load ' + symbol + ': ' + e.message;
-        const errOverlay = document.getElementById('chart-error');
-        if (errOverlay) errOverlay.classList.remove('hidden');
-        const demo = DemoData.generate(symbol, market);
-        ChartManager.updateChartData(demo);
-        StatusBar.update(false, 'Demo data (error loading)');
-      }
-    } finally {
-      ChartManager.hideLoading();
-      const chartArea = document.getElementById('chart-area');
-      if (chartArea) chartArea.style.opacity = '1';
-    }
-  },
-
-  async _backgroundRefresh(symbol, market, timeframe) {
-    try {
-      const candles = await API.fetchCandles(symbol, market, timeframe);
-      // Verify user hasn't navigated away
-      if (symbol !== AppState.currentSymbol || timeframe !== AppState.currentTimeframe) return;
-      if (candles && candles.length > 0) {
-        ChartManager.updateChartData(candles);
-        TrendlineManager.render();
-        await CandleCache.put(symbol, market, timeframe, candles);
-        const sources = { crypto: 'Binance', stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
-        StatusBar.update(true, sources[market] || 'Yahoo Finance');
-      }
-    } catch(e) {
-      console.warn('Background refresh failed:', e.message);
-    }
-  },
-
-  // Prefetch all watchlist symbols so switching is instant
-  async prefetchWatchlist() {
-    const timeframe = AppState.currentTimeframe;
-    const currentSym = AppState.currentSymbol;
-    const toFetch = AppState.watchlist.filter(w => w.symbol !== currentSym);
-
-    console.log(`[Prefetch] Starting background prefetch for ${toFetch.length} watchlist symbols...`);
-    let fetched = 0;
-
-    // Fetch 3 at a time to avoid hammering APIs
-    for (let i = 0; i < toFetch.length; i += 3) {
-      const batch = toFetch.slice(i, i + 3);
-      const promises = batch.map(async (w) => {
-        try {
-          // Skip if already cached and fresh
-          const cached = await CandleCache.get(w.symbol, w.market, timeframe);
-          if (cached && !CandleCache.isStale(cached, timeframe)) return;
-
-          const candles = await API.fetchCandles(w.symbol, w.market, timeframe);
-          if (candles && candles.length > 0) {
-            await CandleCache.put(w.symbol, w.market, timeframe, candles);
-            fetched++;
-          }
-        } catch(e) {
-          // Silent fail — prefetch is best-effort
-        }
-      });
-      await Promise.all(promises);
-      // Small delay between batches to be gentle on APIs
-      if (i + 3 < toFetch.length) await new Promise(r => setTimeout(r, 500));
-    }
-    console.log(`[Prefetch] Done. ${fetched} symbols cached for ${timeframe}.`);
-  },
-
-  connectRealtime() {
-    API.connectBinanceWS(AppState.currentSymbol, AppState.currentTimeframe, (kline) => {
-      ChartManager.updateLastCandle(kline);
-    });
+    TVChart.load(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
   },
 
   startStockChartPolling() {
     if (AppState.stockPollTimer) clearInterval(AppState.stockPollTimer);
-    // Refresh chart every 60 seconds for stocks/NSE/BSE
+    // Status bar countdown timer for stocks/NSE/BSE
     let countdown = 60;
     const statusTime = document.getElementById('status-time');
     const tick = () => {
@@ -3105,19 +1952,8 @@ const App = {
       if (statusTime) statusTime.textContent = `Next refresh: ${countdown}s | ${new Date().toLocaleTimeString()}`;
       if (countdown <= 0) {
         countdown = 60;
-        refreshChart();
+        // TradingView widget handles its own chart data refresh
       }
-    };
-    const refreshChart = async () => {
-      try {
-        const candles = await API.fetchCandles(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
-        if (candles.length > 0) {
-          ChartManager.updateChartData(candles);
-          await CandleCache.put(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe, candles);
-          const sources = { stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
-          StatusBar.update(true, sources[AppState.currentMarket] || 'Yahoo Finance');
-        }
-      } catch(e) {}
     };
     AppState.stockPollTimer = setInterval(tick, 1000);
   }
