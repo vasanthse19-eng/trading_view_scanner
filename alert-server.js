@@ -25,6 +25,37 @@ let alerts = [];
 let alertHistory = [];
 let lastPrices = {}; // symbol -> { price, time }
 
+// ==================== YAHOO CHART CACHE ====================
+const chartCache = {};  // key: "SYMBOL:range:interval" -> { data, timestamp }
+
+function getCacheTTL(interval) {
+  if (['1m','2m','5m','15m','60m'].includes(interval)) return 5 * 60 * 1000;  // 5 min
+  if (interval === '1d') return 60 * 60 * 1000;        // 1 hour
+  return 6 * 60 * 60 * 1000;                           // 6 hours for weekly/monthly
+}
+
+function getFromCache(key, interval) {
+  const entry = chartCache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > getCacheTTL(interval)) {
+    delete chartCache[key];
+    return null;
+  }
+  return entry.data;
+}
+
+function putInCache(key, data) {
+  const keys = Object.keys(chartCache);
+  if (keys.length > 100) {
+    let oldest = keys[0], oldestTime = chartCache[keys[0]].timestamp;
+    keys.forEach(k => {
+      if (chartCache[k].timestamp < oldestTime) { oldest = k; oldestTime = chartCache[k].timestamp; }
+    });
+    delete chartCache[oldest];
+  }
+  chartCache[key] = { data, timestamp: Date.now() };
+}
+
 function loadAlerts() {
   try {
     if (fs.existsSync(ALERTS_FILE)) {
@@ -381,11 +412,29 @@ app.get('/api/yahoo/chart/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
     const { range = '1mo', interval = '60m' } = req.query;
+    const cacheKey = `${symbol}:${range}:${interval}`;
+
+    // Serve from cache if available
+    const cached = getFromCache(cacheKey, interval);
+    if (cached) {
+      const maxAge = ['1d','1wk','1mo'].includes(interval) ? 3600 : 300;
+      res.set('Cache-Control', `public, max-age=${maxAge}`);
+      return res.json(cached);
+    }
+
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const response = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
     const data = await response.json();
+
+    // Cache successful responses
+    if (data.chart && data.chart.result && data.chart.result.length > 0) {
+      putInCache(cacheKey, data);
+    }
+
+    const maxAge = ['1d','1wk','1mo'].includes(interval) ? 3600 : 300;
+    res.set('Cache-Control', `public, max-age=${maxAge}`);
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });

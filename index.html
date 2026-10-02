@@ -533,6 +533,10 @@
       <div class="form-group">
         <label><input type="checkbox" id="set-demo"> Demo Mode (use simulated data)</label>
       </div>
+      <div class="form-group">
+        <button class="btn-secondary" onclick="CandleCache.clear().then(()=>alert('Chart cache cleared!'))" style="width:auto;padding:6px 16px;font-size:12px;">🗑️ Clear Chart Cache</button>
+        <small style="color:var(--text-secondary);display:block;margin-top:4px;">Clears locally cached candle data. Next load will fetch fresh data.</small>
+      </div>
       <div class="modal-actions">
         <button class="btn-secondary" id="btn-settings-cancel">Cancel</button>
         <button class="btn-primary" id="btn-settings-save" style="width:auto;padding:8px 24px;">Save</button>
@@ -766,6 +770,80 @@ const Storage = {
   }
 };
 
+// ==================== CANDLE CACHE (IndexedDB) ====================
+const CandleCache = {
+  DB_NAME: 'tradeview_candle_cache',
+  DB_VERSION: 1,
+  STORE_NAME: 'candles',
+  db: null,
+
+  async init() {
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(this.STORE_NAME)) {
+            db.createObjectStore(this.STORE_NAME, { keyPath: 'key' });
+          }
+        };
+        req.onsuccess = (e) => { this.db = e.target.result; resolve(); };
+        req.onerror = () => { console.warn('IndexedDB init failed'); resolve(); };
+      } catch(e) { console.warn('IndexedDB not available'); resolve(); }
+    });
+  },
+
+  _key(symbol, market, timeframe) {
+    return `${symbol}:${market}:${timeframe}`;
+  },
+
+  _ttl(timeframe) {
+    if (['1m','5m','15m'].includes(timeframe)) return 2 * 60 * 1000;       // 2 min
+    if (['1h','2h','4h'].includes(timeframe)) return 5 * 60 * 1000;        // 5 min
+    return 30 * 60 * 1000;  // 30 min for daily/weekly/monthly
+  },
+
+  async get(symbol, market, timeframe) {
+    if (!this.db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = this.db.transaction(this.STORE_NAME, 'readonly');
+        const store = tx.objectStore(this.STORE_NAME);
+        const req = store.get(this._key(symbol, market, timeframe));
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch(e) { resolve(null); }
+    });
+  },
+
+  async put(symbol, market, timeframe, candles) {
+    if (!this.db || !candles || candles.length === 0) return;
+    try {
+      const tx = this.db.transaction(this.STORE_NAME, 'readwrite');
+      const store = tx.objectStore(this.STORE_NAME);
+      store.put({
+        key: this._key(symbol, market, timeframe),
+        candles: candles,
+        lastTimestamp: candles[candles.length - 1].time,
+        savedAt: Date.now()
+      });
+    } catch(e) { console.warn('CandleCache put failed:', e); }
+  },
+
+  isStale(entry, timeframe) {
+    if (!entry) return true;
+    return (Date.now() - entry.savedAt) > this._ttl(timeframe);
+  },
+
+  async clear() {
+    if (!this.db) return;
+    try {
+      const tx = this.db.transaction(this.STORE_NAME, 'readwrite');
+      tx.objectStore(this.STORE_NAME).clear();
+    } catch(e) {}
+  }
+};
+
 // ==================== DEMO DATA ====================
 const DemoData = {
   generate(symbol, market, count = 300) {
@@ -797,13 +875,13 @@ const API = {
   // Yahoo range/interval mapping
   yahooMap: {
     '1m':  { range: '1d',  interval: '1m' },
-    '5m':  { range: '5d',  interval: '5m' },
-    '15m': { range: '5d',  interval: '15m' },
-    '1h':  { range: '6mo', interval: '60m' },
-    '2h':  { range: '3mo', interval: '60m', aggregate: 2 },
-    '4h':  { range: '6mo', interval: '60m', aggregate: 4 },
-    '1D':  { range: '5y',  interval: '1d' },
-    '3D':  { range: '5y',  interval: '1d',  aggregate: 3 },
+    '5m':  { range: '60d', interval: '5m' },
+    '15m': { range: '60d', interval: '15m' },
+    '1h':  { range: '2y',  interval: '60m' },
+    '2h':  { range: '2y',  interval: '60m', aggregate: 2 },
+    '4h':  { range: '2y',  interval: '60m', aggregate: 4 },
+    '1D':  { range: 'max', interval: '1d' },
+    '3D':  { range: 'max', interval: '1d',  aggregate: 3 },
     '1W':  { range: 'max', interval: '1wk' },
     '1M':  { range: 'max', interval: '1mo' }
   },
@@ -828,9 +906,10 @@ const API = {
   finnhubRes: { '1m':'1', '5m':'5', '15m':'15', '1h':'60', '2h':'60', '4h':'D', '1D':'D', '3D':'D', '1W':'W', '1M':'M' },
 
   // --- Binance REST ---
-  async fetchBinanceKlines(symbol, interval, limit = 1000) {
+  async fetchBinanceKlines(symbol, interval, limit = 1000, startTime = null) {
     const bi = this.binanceIntervals[interval] || '1h';
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${bi}&limit=${limit}`;
+    let url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${bi}&limit=${limit}`;
+    if (startTime) url += `&startTime=${startTime * 1000}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Binance ${resp.status}`);
     const data = await resp.json();
@@ -1509,6 +1588,10 @@ const ChartManager = {
     if (candles.length > 0) {
       const last = candles[candles.length - 1];
       UIController.updateChartInfoBar(last);
+    }
+    // Show all candles in view (not just last 10 bars)
+    if (AppState.charts.main) {
+      AppState.charts.main.timeScale().fitContent();
     }
   },
 
@@ -2766,6 +2849,7 @@ function activateTool(tool) {
 const App = {
   async init() {
     Storage.restore();
+    await CandleCache.init();
 
     // Parse URL parameters for deep-linking from scanner dashboard
     const urlParams = new URLSearchParams(window.location.search);
@@ -2841,28 +2925,78 @@ const App = {
   },
 
   async loadChartData() {
+    const symbol = AppState.currentSymbol;
+    const market = AppState.currentMarket;
+    const timeframe = AppState.currentTimeframe;
+    const sym = symbol.replace('USDT','').replace('.NS','').replace('.BO','');
+    const sources = { crypto: 'Binance', stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
+
     try {
-      const sym = AppState.currentSymbol.replace('USDT','').replace('.NS','').replace('.BO','');
-      ChartManager.showLoading('Loading ' + sym + ' ' + AppState.currentTimeframe + '...');
+      // 1. Try to show cached data IMMEDIATELY (no spinner)
+      const cached = await CandleCache.get(symbol, market, timeframe);
+      if (cached && cached.candles && cached.candles.length > 0) {
+        ChartManager.updateChartData(cached.candles);
+        TrendlineManager.render();
+        StatusBar.update(true, (sources[market] || 'Yahoo Finance') + ' (cached)');
+
+        // If cache is fresh enough, skip network fetch
+        if (!CandleCache.isStale(cached, timeframe)) {
+          return;
+        }
+        // Cache is stale — refresh in background (no spinner)
+        this._backgroundRefresh(symbol, market, timeframe);
+        return;
+      }
+
+      // 2. No cache — full fetch with loading spinner
+      ChartManager.showLoading('Loading ' + sym + ' ' + timeframe + '...');
       StatusBar.update(false, 'Loading data...');
-      const candles = await API.fetchCandles(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
+      const candles = await API.fetchCandles(symbol, market, timeframe);
+
+      // Verify user hasn't navigated away during fetch
+      if (symbol !== AppState.currentSymbol || timeframe !== AppState.currentTimeframe) return;
+
       ChartManager.updateChartData(candles);
       TrendlineManager.render();
-      const sources = { crypto: 'Binance', stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
-      StatusBar.update(true, sources[AppState.currentMarket] || 'Yahoo Finance');
+      await CandleCache.put(symbol, market, timeframe, candles);
+      StatusBar.update(true, sources[market] || 'Yahoo Finance');
     } catch(e) {
       console.error('Failed to load chart data:', e);
-      const errText = document.getElementById('chart-error-text');
-      if (errText) errText.textContent = 'Failed to load ' + AppState.currentSymbol + ': ' + e.message;
-      const errOverlay = document.getElementById('chart-error');
-      if (errOverlay) errOverlay.classList.remove('hidden');
-      const demo = DemoData.generate(AppState.currentSymbol, AppState.currentMarket);
-      ChartManager.updateChartData(demo);
-      StatusBar.update(false, 'Demo data (error loading)');
+      // On error, try showing cached data
+      const cached = await CandleCache.get(symbol, market, timeframe);
+      if (cached && cached.candles && cached.candles.length > 0) {
+        ChartManager.updateChartData(cached.candles);
+        StatusBar.update(false, 'Cached data (offline)');
+      } else {
+        const errText = document.getElementById('chart-error-text');
+        if (errText) errText.textContent = 'Failed to load ' + symbol + ': ' + e.message;
+        const errOverlay = document.getElementById('chart-error');
+        if (errOverlay) errOverlay.classList.remove('hidden');
+        const demo = DemoData.generate(symbol, market);
+        ChartManager.updateChartData(demo);
+        StatusBar.update(false, 'Demo data (error loading)');
+      }
     } finally {
       ChartManager.hideLoading();
       const chartArea = document.getElementById('chart-area');
       if (chartArea) chartArea.style.opacity = '1';
+    }
+  },
+
+  async _backgroundRefresh(symbol, market, timeframe) {
+    try {
+      const candles = await API.fetchCandles(symbol, market, timeframe);
+      // Verify user hasn't navigated away
+      if (symbol !== AppState.currentSymbol || timeframe !== AppState.currentTimeframe) return;
+      if (candles && candles.length > 0) {
+        ChartManager.updateChartData(candles);
+        TrendlineManager.render();
+        await CandleCache.put(symbol, market, timeframe, candles);
+        const sources = { crypto: 'Binance', stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
+        StatusBar.update(true, sources[market] || 'Yahoo Finance');
+      }
+    } catch(e) {
+      console.warn('Background refresh failed:', e.message);
     }
   },
 
@@ -2890,6 +3024,7 @@ const App = {
         const candles = await API.fetchCandles(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
         if (candles.length > 0) {
           ChartManager.updateChartData(candles);
+          await CandleCache.put(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe, candles);
           const sources = { stocks: 'Yahoo Finance', nse: 'Yahoo Finance (NSE)', bse: 'Yahoo Finance (BSE)' };
           StatusBar.update(true, sources[AppState.currentMarket] || 'Yahoo Finance');
         }
