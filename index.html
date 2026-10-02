@@ -45,7 +45,7 @@
       --shadow: 0 4px 12px rgba(0,0,0,0.4);
       --radius: 4px;
       --radius-lg: 8px;
-      --toolbar-height: 48px;
+      --toolbar-height: 80px;
       --statusbar-height: 24px;
       --sidebar-width: 240px;
     }
@@ -56,11 +56,16 @@
 
     /* ===== HEADER / TOOLBAR ===== */
     #toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      height: var(--toolbar-height); padding: 0 12px;
+      display: flex; flex-direction: column;
+      height: auto; padding: 0;
       background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);
-      gap: 8px; z-index: 100; flex-shrink: 0;
+      z-index: 100; flex-shrink: 0;
     }
+    .toolbar-row {
+      display: flex; align-items: center; padding: 0 12px; gap: 8px;
+    }
+    .toolbar-row.primary { height: 44px; justify-content: space-between; border-bottom: 1px solid var(--border-color); }
+    .toolbar-row.secondary { height: 36px; gap: 4px; justify-content: flex-start; }
     .toolbar-section { display: flex; align-items: center; gap: 6px; }
     .toolbar-section.center { gap: 2px; }
     .logo { font-weight: 700; font-size: 15px; color: var(--accent-blue); margin-right: 12px; white-space: nowrap; }
@@ -121,6 +126,35 @@
       cursor: pointer; font-size: 16px; border-radius: var(--radius);
     }
     .icon-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+
+    /* Indicator Dropdown */
+    .ind-dropdown { position: relative; }
+    .ind-dropdown-btn {
+      padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
+      background: transparent; border: 1px solid var(--border-color);
+      color: var(--text-secondary); border-radius: var(--radius); transition: all 0.15s;
+    }
+    .ind-dropdown-btn:hover { border-color: var(--border-light); color: var(--text-primary); }
+    .ind-dropdown-btn.has-active { color: var(--accent-blue); border-color: var(--accent-blue); }
+    .ind-dropdown-panel {
+      display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
+      background: var(--bg-secondary); border: 1px solid var(--border-color);
+      border-radius: 6px; padding: 8px; z-index: 200;
+      min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .ind-dropdown-panel.open { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .ind-dropdown-item {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 10px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; color: var(--text-secondary); transition: background 0.15s; white-space: nowrap;
+    }
+    .ind-dropdown-item:hover { background: var(--bg-tertiary); }
+    .ind-dropdown-item.active { color: var(--accent-blue); background: rgba(41,98,255,0.1); }
+    .ind-dropdown-item .ind-check {
+      width: 14px; height: 14px; border: 1px solid var(--border-color);
+      border-radius: 3px; display: inline-block; flex-shrink: 0;
+    }
+    .ind-dropdown-item.active .ind-check { background: var(--accent-blue); border-color: var(--accent-blue); }
 
     /* ===== MAIN LAYOUT ===== */
     #app-container {
@@ -277,7 +311,7 @@
     }
     @media (max-width: 768px) {
       #watchlist-panel, #alert-panel { display: none; }
-      .toolbar-section.center { display: none; }
+      .toolbar-row.secondary { flex-wrap: wrap; height: auto; padding: 4px 12px; }
       .search-input { width: 140px; }
     }
 
@@ -319,42 +353,45 @@
 
   <!-- ===== TOOLBAR ===== -->
   <header id="toolbar">
-    <div class="toolbar-section">
-      <div class="logo">TradeView<span>Pro</span></div>
-      <div class="search-container">
-        <span class="search-icon">🔍</span>
-        <input type="text" class="search-input" id="search-input" placeholder="Search symbol..." autocomplete="off">
-        <div class="search-dropdown" id="search-dropdown"></div>
+    <!-- ROW 1: Primary — Logo, Search, Market, ChartType, Scanner, Settings -->
+    <div class="toolbar-row primary">
+      <div class="toolbar-section">
+        <div class="logo">TradeView<span>Pro</span></div>
+        <div class="search-container">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" id="search-input" placeholder="Search symbol..." autocomplete="off">
+          <div class="search-dropdown" id="search-dropdown"></div>
+        </div>
+        <div class="market-toggle">
+          <button class="market-btn active" data-market="crypto">Crypto</button>
+          <button class="market-btn" data-market="stocks">US Stocks</button>
+          <button class="market-btn" data-market="nse">NSE</button>
+          <button class="market-btn" data-market="bse">BSE</button>
+        </div>
+        <!-- Chart Type Selector -->
+        <div class="market-toggle" style="margin-left:4px;">
+          <button class="chart-type-btn active" data-type="candlestick" title="Candlestick">🕯️</button>
+          <button class="chart-type-btn" data-type="line" title="Line">📈</button>
+          <button class="chart-type-btn" data-type="area" title="Area">▦</button>
+          <button class="chart-type-btn" data-type="heikinashi" title="Heikin-Ashi">HA</button>
+        </div>
       </div>
-      <div class="market-toggle">
-        <button class="market-btn active" data-market="crypto">Crypto</button>
-        <button class="market-btn" data-market="stocks">US Stocks</button>
-        <button class="market-btn" data-market="nse">NSE</button>
-        <button class="market-btn" data-market="bse">BSE</button>
-      </div>
-      <!-- Chart Type Selector -->
-      <div class="market-toggle" style="margin-left:4px;">
-        <button class="chart-type-btn active" data-type="candlestick" title="Candlestick">🕯️</button>
-        <button class="chart-type-btn" data-type="line" title="Line">📈</button>
-        <button class="chart-type-btn" data-type="area" title="Area">▦</button>
-        <button class="chart-type-btn" data-type="heikinashi" title="Heikin-Ashi">HA</button>
+      <div class="toolbar-section">
+        <a href="/api/scanner/dashboard" class="icon-btn" title="Pattern Scanner" style="text-decoration:none;font-size:16px;">📊</a>
+        <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
+        <button class="icon-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
       </div>
     </div>
 
-    <div class="toolbar-section center" id="timeframe-bar"></div>
-
-    <div class="toolbar-section">
-      <button class="ind-btn" data-ind="sma" title="Simple Moving Average">SMA</button>
-      <button class="ind-btn" data-ind="ema" title="Exponential Moving Average">EMA</button>
-      <button class="ind-btn" data-ind="bb" title="Bollinger Bands">BB</button>
-      <button class="ind-btn" data-ind="rsi" title="Relative Strength Index">RSI</button>
-      <button class="ind-btn" data-ind="macd" title="MACD">MACD</button>
-      <button class="ind-btn active" data-ind="volume" title="Volume">VOL</button>
+    <!-- ROW 2: Secondary — Timeframes, Indicators Dropdown, Drawing Tools, Utils -->
+    <div class="toolbar-row secondary">
+      <div class="toolbar-section center" id="timeframe-bar"></div>
       <div class="divider"></div>
-      <button class="ind-btn" data-ind="stoch" title="Stochastic RSI">SRSI</button>
-      <button class="ind-btn" data-ind="atr" title="Average True Range">ATR</button>
-      <button class="ind-btn" data-ind="vwap" title="Volume Weighted Avg Price">VWAP</button>
-      <button class="ind-btn" data-ind="supertrend" title="Supertrend">ST</button>
+      <!-- Indicator Dropdown -->
+      <div class="ind-dropdown" id="ind-dropdown">
+        <button class="ind-dropdown-btn" id="ind-dropdown-btn">Indicators ▾</button>
+        <div class="ind-dropdown-panel" id="ind-dropdown-panel"></div>
+      </div>
       <div class="divider"></div>
       <button class="tool-btn" data-tool="trendline" title="Draw Trendline">📏 Trend</button>
       <button class="tool-btn" data-tool="hline" title="Horizontal Line">─ H-Line</button>
@@ -363,9 +400,6 @@
       <button class="icon-btn" id="btn-screenshot" title="Screenshot Chart">📸</button>
       <button class="icon-btn" id="btn-theme" title="Change Theme">🎨</button>
       <button class="icon-btn" id="btn-hotkeys" title="Hotkeys">⌨️</button>
-      <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
-      <button class="icon-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
-      <a href="/api/scanner/dashboard" class="icon-btn" title="Pattern Scanner" style="text-decoration:none;font-size:16px;">📊</a>
     </div>
   </header>
 
@@ -2441,25 +2475,53 @@ const UIController = {
       tfBar.appendChild(btn);
     });
 
-    // Indicator toggles
-    document.querySelectorAll('.ind-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const ind = btn.dataset.ind;
-        if (AppState.activeIndicators.has(ind)) {
-          AppState.activeIndicators.delete(ind);
-          btn.classList.remove('active');
+    // Indicator dropdown
+    const indIndicators = [
+      { key: 'sma', label: 'SMA', desc: 'Simple Moving Average' },
+      { key: 'ema', label: 'EMA', desc: 'Exponential MA' },
+      { key: 'bb', label: 'BB', desc: 'Bollinger Bands' },
+      { key: 'rsi', label: 'RSI', desc: 'Relative Strength Index' },
+      { key: 'macd', label: 'MACD', desc: 'MACD' },
+      { key: 'volume', label: 'VOL', desc: 'Volume' },
+      { key: 'stoch', label: 'SRSI', desc: 'Stochastic RSI' },
+      { key: 'atr', label: 'ATR', desc: 'Average True Range' },
+      { key: 'vwap', label: 'VWAP', desc: 'Vol Weighted Avg Price' },
+      { key: 'supertrend', label: 'ST', desc: 'Supertrend' }
+    ];
+    const indPanel = document.getElementById('ind-dropdown-panel');
+    const indBtn = document.getElementById('ind-dropdown-btn');
+    function updateIndDropdownLabel() {
+      const count = AppState.activeIndicators.size;
+      indBtn.textContent = count > 0 ? `Indicators (${count}) ▾` : 'Indicators ▾';
+      indBtn.classList.toggle('has-active', count > 0);
+    }
+    indIndicators.forEach(ind => {
+      const item = document.createElement('div');
+      item.className = 'ind-dropdown-item' + (AppState.activeIndicators.has(ind.key) ? ' active' : '');
+      item.dataset.ind = ind.key;
+      item.innerHTML = `<span class="ind-check"></span><span><b>${ind.label}</b> ${ind.desc}</span>`;
+      item.addEventListener('click', () => {
+        if (AppState.activeIndicators.has(ind.key)) {
+          AppState.activeIndicators.delete(ind.key);
+          item.classList.remove('active');
         } else {
-          AppState.activeIndicators.add(ind);
-          btn.classList.add('active');
+          AppState.activeIndicators.add(ind.key);
+          item.classList.add('active');
         }
         Storage.save();
         ChartManager.updateIndicators();
+        updateIndDropdownLabel();
       });
+      indPanel.appendChild(item);
     });
-    // Set initial button states
-    AppState.activeIndicators.forEach(ind => {
-      const btn = document.querySelector(`.ind-btn[data-ind="${ind}"]`);
-      if (btn) btn.classList.add('active');
+    updateIndDropdownLabel();
+    // Toggle dropdown open/close
+    indBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      indPanel.classList.toggle('open');
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#ind-dropdown')) indPanel.classList.remove('open');
     });
 
     // Drawing tools
