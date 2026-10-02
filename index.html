@@ -771,101 +771,7 @@ const AppState = {
   activeIndicators: new Set(['volume']),
   candles: [],
   watchlist: [],
-  watchlists: [
-    { id: 'us_stocks', name: '🇺🇸 US Stocks', stocks: [
-      { symbol: 'AAPL', market: 'stocks', name: 'Apple Inc.' },
-      { symbol: 'MSFT', market: 'stocks', name: 'Microsoft' },
-      { symbol: 'GOOGL', market: 'stocks', name: 'Alphabet' },
-      { symbol: 'AMZN', market: 'stocks', name: 'Amazon' },
-      { symbol: 'NVDA', market: 'stocks', name: 'NVIDIA' },
-      { symbol: 'META', market: 'stocks', name: 'Meta Platforms' },
-      { symbol: 'TSLA', market: 'stocks', name: 'Tesla' },
-      { symbol: 'BRK-B', market: 'stocks', name: 'Berkshire Hathaway' },
-      { symbol: 'JPM', market: 'stocks', name: 'JPMorgan Chase' },
-      { symbol: 'V', market: 'stocks', name: 'Visa Inc.' },
-      { symbol: 'UNH', market: 'stocks', name: 'UnitedHealth' },
-      { symbol: 'MA', market: 'stocks', name: 'Mastercard' },
-      { symbol: 'JNJ', market: 'stocks', name: 'Johnson & Johnson' },
-      { symbol: 'HD', market: 'stocks', name: 'Home Depot' },
-      { symbol: 'PG', market: 'stocks', name: 'Procter & Gamble' },
-      { symbol: 'NFLX', market: 'stocks', name: 'Netflix' },
-      { symbol: 'COST', market: 'stocks', name: 'Costco' },
-      { symbol: 'ABBV', market: 'stocks', name: 'AbbVie' },
-      { symbol: 'CRM', market: 'stocks', name: 'Salesforce' },
-      { symbol: 'AVGO', market: 'stocks', name: 'Broadcom' },
-      { symbol: 'KO', market: 'stocks', name: 'Coca-Cola' },
-      { symbol: 'PEP', market: 'stocks', name: 'PepsiCo' },
-      { symbol: 'MRK', market: 'stocks', name: 'Merck & Co' },
-      { symbol: 'WMT', market: 'stocks', name: 'Walmart' },
-      { symbol: 'LLY', market: 'stocks', name: 'Eli Lilly' },
-      { symbol: 'BAC', market: 'stocks', name: 'Bank of America' },
-      { symbol: 'AMD', market: 'stocks', name: 'AMD' },
-      { symbol: 'INTC', market: 'stocks', name: 'Intel' },
-      { symbol: 'ADBE', market: 'stocks', name: 'Adobe' },
-      { symbol: 'ORCL', market: 'stocks', name: 'Oracle' },
-      { symbol: 'DIS', market: 'stocks', name: 'Walt Disney' },
-      { symbol: 'CSCO', market: 'stocks', name: 'Cisco Systems' },
-      { symbol: 'XOM', market: 'stocks', name: 'Exxon Mobil' },
-      { symbol: 'CVX', market: 'stocks', name: 'Chevron' },
-      { symbol: 'QCOM', market: 'stocks', name: 'Qualcomm' },
-      { symbol: 'ABT', market: 'stocks', name: 'Abbott Labs' },
-      { symbol: 'T', market: 'stocks', name: 'AT&T' },
-      { symbol: 'VZ', market: 'stocks', name: 'Verizon' },
-      { symbol: 'NKE', market: 'stocks', name: 'Nike' },
-      { symbol: 'MCD', market: 'stocks', name: 'McDonald\'s' },
-      { symbol: 'GS', market: 'stocks', name: 'Goldman Sachs' },
-      { symbol: 'MS', market: 'stocks', name: 'Morgan Stanley' },
-      { symbol: 'PYPL', market: 'stocks', name: 'PayPal' },
-      { symbol: 'UBER', market: 'stocks', name: 'Uber' },
-      { symbol: 'BA', market: 'stocks', name: 'Boeing' },
-      { symbol: 'CAT', market: 'stocks', name: 'Caterpillar' },
-      { symbol: 'SBUX', market: 'stocks', name: 'Starbucks' },
-      { symbol: 'GE', market: 'stocks', name: 'GE Aerospace' },
-      { symbol: 'PLTR', market: 'stocks', name: 'Palantir' },
-      { symbol: 'COIN', market: 'stocks', name: 'Coinbase' }
-    ]},
-    { id: 'crypto', name: '₿ Crypto', stocks: [
-      { symbol: 'BTCUSDT', market: 'crypto', name: 'Bitcoin' },
-      { symbol: 'ETHUSDT', market: 'crypto', name: 'Ethereum' },
-      { symbol: 'BNBUSDT', market: 'crypto', name: 'BNB' },
-      { symbol: 'SOLUSDT', market: 'crypto', name: 'Solana' },
-      { symbol: 'XRPUSDT', market: 'crypto', name: 'XRP' },
-      { symbol: 'ADAUSDT', market: 'crypto', name: 'Cardano' },
-      { symbol: 'DOGEUSDT', market: 'crypto', name: 'Dogecoin' },
-      { symbol: 'AVAXUSDT', market: 'crypto', name: 'Avalanche' },
-      { symbol: 'DOTUSDT', market: 'crypto', name: 'Polkadot' },
-      { symbol: 'MATICUSDT', market: 'crypto', name: 'Polygon' }
-    ]},
-    { id: 'nse', name: '🇮🇳 NSE', stocks: [
-      { symbol: 'RELIANCE.NS', market: 'nse', name: 'Reliance Industries' },
-      { symbol: 'TCS.NS', market: 'nse', name: 'Tata Consultancy' },
-      { symbol: 'HDFCBANK.NS', market: 'nse', name: 'HDFC Bank' },
-      { symbol: 'INFY.NS', market: 'nse', name: 'Infosys' },
-      { symbol: 'ICICIBANK.NS', market: 'nse', name: 'ICICI Bank' },
-      { symbol: 'SBIN.NS', market: 'nse', name: 'State Bank of India' },
-      { symbol: 'BHARTIARTL.NS', market: 'nse', name: 'Bharti Airtel' },
-      { symbol: 'ITC.NS', market: 'nse', name: 'ITC Ltd' },
-      { symbol: 'KOTAKBANK.NS', market: 'nse', name: 'Kotak Mahindra Bank' },
-      { symbol: 'LT.NS', market: 'nse', name: 'Larsen & Toubro' },
-      { symbol: 'HINDUNILVR.NS', market: 'nse', name: 'Hindustan Unilever' },
-      { symbol: 'BAJFINANCE.NS', market: 'nse', name: 'Bajaj Finance' },
-      { symbol: 'TATAMOTORS.NS', market: 'nse', name: 'Tata Motors' },
-      { symbol: 'MARUTI.NS', market: 'nse', name: 'Maruti Suzuki' },
-      { symbol: 'SUNPHARMA.NS', market: 'nse', name: 'Sun Pharmaceutical' }
-    ]},
-    { id: 'commodities', name: '🛢️ Commodities', stocks: [
-      { symbol: 'GC=F', market: 'stocks', name: 'Gold Futures' },
-      { symbol: 'SI=F', market: 'stocks', name: 'Silver Futures' },
-      { symbol: 'CL=F', market: 'stocks', name: 'Crude Oil WTI' },
-      { symbol: 'BZ=F', market: 'stocks', name: 'Brent Crude Oil' },
-      { symbol: 'NG=F', market: 'stocks', name: 'Natural Gas' },
-      { symbol: 'HG=F', market: 'stocks', name: 'Copper' },
-      { symbol: 'PL=F', market: 'stocks', name: 'Platinum' },
-      { symbol: 'ZW=F', market: 'stocks', name: 'Wheat' },
-      { symbol: 'ZC=F', market: 'stocks', name: 'Corn' },
-      { symbol: 'CT=F', market: 'stocks', name: 'Cotton' }
-    ]}
-  ],
+  watchlists: [], // populated from DEFAULT_WATCHLISTS below
   activeWatchlistId: 'nse',
   alerts: [],
   alertHistory: [],
@@ -883,12 +789,164 @@ const AppState = {
   prevPrices: {} // for trendline alert: symbol -> {price, time}
 };
 
+// Default watchlists — bump version when these change so returning users get updates
+const WATCHLIST_VERSION = 2;
+const DEFAULT_WATCHLISTS = [
+  { id: 'us_stocks', name: '🇺🇸 US Stocks', stocks: [
+    { symbol: 'AAPL', market: 'stocks', name: 'Apple Inc.' },
+    { symbol: 'MSFT', market: 'stocks', name: 'Microsoft' },
+    { symbol: 'GOOGL', market: 'stocks', name: 'Alphabet' },
+    { symbol: 'AMZN', market: 'stocks', name: 'Amazon' },
+    { symbol: 'NVDA', market: 'stocks', name: 'NVIDIA' },
+    { symbol: 'META', market: 'stocks', name: 'Meta Platforms' },
+    { symbol: 'TSLA', market: 'stocks', name: 'Tesla' },
+    { symbol: 'BRK-B', market: 'stocks', name: 'Berkshire Hathaway' },
+    { symbol: 'JPM', market: 'stocks', name: 'JPMorgan Chase' },
+    { symbol: 'V', market: 'stocks', name: 'Visa Inc.' },
+    { symbol: 'UNH', market: 'stocks', name: 'UnitedHealth' },
+    { symbol: 'MA', market: 'stocks', name: 'Mastercard' },
+    { symbol: 'JNJ', market: 'stocks', name: 'Johnson & Johnson' },
+    { symbol: 'HD', market: 'stocks', name: 'Home Depot' },
+    { symbol: 'PG', market: 'stocks', name: 'Procter & Gamble' },
+    { symbol: 'NFLX', market: 'stocks', name: 'Netflix' },
+    { symbol: 'COST', market: 'stocks', name: 'Costco' },
+    { symbol: 'ABBV', market: 'stocks', name: 'AbbVie' },
+    { symbol: 'CRM', market: 'stocks', name: 'Salesforce' },
+    { symbol: 'AVGO', market: 'stocks', name: 'Broadcom' },
+    { symbol: 'KO', market: 'stocks', name: 'Coca-Cola' },
+    { symbol: 'PEP', market: 'stocks', name: 'PepsiCo' },
+    { symbol: 'MRK', market: 'stocks', name: 'Merck & Co' },
+    { symbol: 'WMT', market: 'stocks', name: 'Walmart' },
+    { symbol: 'LLY', market: 'stocks', name: 'Eli Lilly' },
+    { symbol: 'BAC', market: 'stocks', name: 'Bank of America' },
+    { symbol: 'AMD', market: 'stocks', name: 'AMD' },
+    { symbol: 'INTC', market: 'stocks', name: 'Intel' },
+    { symbol: 'ADBE', market: 'stocks', name: 'Adobe' },
+    { symbol: 'ORCL', market: 'stocks', name: 'Oracle' },
+    { symbol: 'DIS', market: 'stocks', name: 'Walt Disney' },
+    { symbol: 'CSCO', market: 'stocks', name: 'Cisco Systems' },
+    { symbol: 'XOM', market: 'stocks', name: 'Exxon Mobil' },
+    { symbol: 'CVX', market: 'stocks', name: 'Chevron' },
+    { symbol: 'QCOM', market: 'stocks', name: 'Qualcomm' },
+    { symbol: 'ABT', market: 'stocks', name: 'Abbott Labs' },
+    { symbol: 'T', market: 'stocks', name: 'AT&T' },
+    { symbol: 'VZ', market: 'stocks', name: 'Verizon' },
+    { symbol: 'NKE', market: 'stocks', name: 'Nike' },
+    { symbol: 'MCD', market: 'stocks', name: 'McDonald\'s' },
+    { symbol: 'GS', market: 'stocks', name: 'Goldman Sachs' },
+    { symbol: 'MS', market: 'stocks', name: 'Morgan Stanley' },
+    { symbol: 'PYPL', market: 'stocks', name: 'PayPal' },
+    { symbol: 'UBER', market: 'stocks', name: 'Uber' },
+    { symbol: 'BA', market: 'stocks', name: 'Boeing' },
+    { symbol: 'CAT', market: 'stocks', name: 'Caterpillar' },
+    { symbol: 'SBUX', market: 'stocks', name: 'Starbucks' },
+    { symbol: 'GE', market: 'stocks', name: 'GE Aerospace' },
+    { symbol: 'PLTR', market: 'stocks', name: 'Palantir' },
+    { symbol: 'COIN', market: 'stocks', name: 'Coinbase' }
+  ]},
+  { id: 'crypto', name: '₿ Crypto', stocks: [
+    { symbol: 'BTCUSDT', market: 'crypto', name: 'Bitcoin' },
+    { symbol: 'ETHUSDT', market: 'crypto', name: 'Ethereum' },
+    { symbol: 'BNBUSDT', market: 'crypto', name: 'BNB' },
+    { symbol: 'SOLUSDT', market: 'crypto', name: 'Solana' },
+    { symbol: 'XRPUSDT', market: 'crypto', name: 'XRP' },
+    { symbol: 'ADAUSDT', market: 'crypto', name: 'Cardano' },
+    { symbol: 'DOGEUSDT', market: 'crypto', name: 'Dogecoin' },
+    { symbol: 'AVAXUSDT', market: 'crypto', name: 'Avalanche' },
+    { symbol: 'DOTUSDT', market: 'crypto', name: 'Polkadot' },
+    { symbol: 'MATICUSDT', market: 'crypto', name: 'Polygon' },
+    { symbol: 'SHIBUSDT', market: 'crypto', name: 'Shiba Inu' },
+    { symbol: 'LINKUSDT', market: 'crypto', name: 'Chainlink' },
+    { symbol: 'UNIUSDT', market: 'crypto', name: 'Uniswap' },
+    { symbol: 'LTCUSDT', market: 'crypto', name: 'Litecoin' },
+    { symbol: 'ATOMUSDT', market: 'crypto', name: 'Cosmos' },
+    { symbol: 'NEARUSDT', market: 'crypto', name: 'NEAR Protocol' },
+    { symbol: 'APTUSDT', market: 'crypto', name: 'Aptos' },
+    { symbol: 'ARUSDT', market: 'crypto', name: 'Arweave' },
+    { symbol: 'SUIUSDT', market: 'crypto', name: 'Sui' },
+    { symbol: 'RENDERUSDT', market: 'crypto', name: 'Render' }
+  ]},
+  { id: 'nse', name: '🇮🇳 NSE', stocks: [
+    { symbol: 'RELIANCE.NS', market: 'nse', name: 'Reliance Industries' },
+    { symbol: 'TCS.NS', market: 'nse', name: 'Tata Consultancy' },
+    { symbol: 'HDFCBANK.NS', market: 'nse', name: 'HDFC Bank' },
+    { symbol: 'INFY.NS', market: 'nse', name: 'Infosys' },
+    { symbol: 'ICICIBANK.NS', market: 'nse', name: 'ICICI Bank' },
+    { symbol: 'SBIN.NS', market: 'nse', name: 'State Bank of India' },
+    { symbol: 'BHARTIARTL.NS', market: 'nse', name: 'Bharti Airtel' },
+    { symbol: 'ITC.NS', market: 'nse', name: 'ITC Ltd' },
+    { symbol: 'KOTAKBANK.NS', market: 'nse', name: 'Kotak Mahindra Bank' },
+    { symbol: 'LT.NS', market: 'nse', name: 'Larsen & Toubro' },
+    { symbol: 'HINDUNILVR.NS', market: 'nse', name: 'Hindustan Unilever' },
+    { symbol: 'BAJFINANCE.NS', market: 'nse', name: 'Bajaj Finance' },
+    { symbol: 'TATAMOTORS.NS', market: 'nse', name: 'Tata Motors' },
+    { symbol: 'MARUTI.NS', market: 'nse', name: 'Maruti Suzuki' },
+    { symbol: 'SUNPHARMA.NS', market: 'nse', name: 'Sun Pharmaceutical' },
+    { symbol: 'WIPRO.NS', market: 'nse', name: 'Wipro' },
+    { symbol: 'HCLTECH.NS', market: 'nse', name: 'HCL Technologies' },
+    { symbol: 'ADANIENT.NS', market: 'nse', name: 'Adani Enterprises' },
+    { symbol: 'ADANIPORTS.NS', market: 'nse', name: 'Adani Ports' },
+    { symbol: 'POWERGRID.NS', market: 'nse', name: 'Power Grid Corp' },
+    { symbol: 'NTPC.NS', market: 'nse', name: 'NTPC Ltd' },
+    { symbol: 'TATASTEEL.NS', market: 'nse', name: 'Tata Steel' },
+    { symbol: 'AXISBANK.NS', market: 'nse', name: 'Axis Bank' },
+    { symbol: 'ULTRACEMCO.NS', market: 'nse', name: 'UltraTech Cement' },
+    { symbol: 'TITAN.NS', market: 'nse', name: 'Titan Company' },
+    { symbol: 'ASIANPAINT.NS', market: 'nse', name: 'Asian Paints' },
+    { symbol: 'NESTLEIND.NS', market: 'nse', name: 'Nestle India' },
+    { symbol: 'JSWSTEEL.NS', market: 'nse', name: 'JSW Steel' },
+    { symbol: 'TECHM.NS', market: 'nse', name: 'Tech Mahindra' },
+    { symbol: 'DRREDDY.NS', market: 'nse', name: 'Dr Reddy\'s Labs' }
+  ]},
+  { id: 'bse', name: '🇮🇳 BSE', stocks: [
+    { symbol: 'RELIANCE.BO', market: 'bse', name: 'Reliance Industries' },
+    { symbol: 'TCS.BO', market: 'bse', name: 'Tata Consultancy' },
+    { symbol: 'HDFCBANK.BO', market: 'bse', name: 'HDFC Bank' },
+    { symbol: 'INFY.BO', market: 'bse', name: 'Infosys' },
+    { symbol: 'ICICIBANK.BO', market: 'bse', name: 'ICICI Bank' },
+    { symbol: 'SBIN.BO', market: 'bse', name: 'State Bank of India' },
+    { symbol: 'BHARTIARTL.BO', market: 'bse', name: 'Bharti Airtel' },
+    { symbol: 'ITC.BO', market: 'bse', name: 'ITC Ltd' },
+    { symbol: 'KOTAKBANK.BO', market: 'bse', name: 'Kotak Mahindra Bank' },
+    { symbol: 'LT.BO', market: 'bse', name: 'Larsen & Toubro' },
+    { symbol: 'HINDUNILVR.BO', market: 'bse', name: 'Hindustan Unilever' },
+    { symbol: 'BAJFINANCE.BO', market: 'bse', name: 'Bajaj Finance' },
+    { symbol: 'TATAMOTORS.BO', market: 'bse', name: 'Tata Motors' },
+    { symbol: 'MARUTI.BO', market: 'bse', name: 'Maruti Suzuki' },
+    { symbol: 'SUNPHARMA.BO', market: 'bse', name: 'Sun Pharmaceutical' },
+    { symbol: 'WIPRO.BO', market: 'bse', name: 'Wipro' },
+    { symbol: 'HCLTECH.BO', market: 'bse', name: 'HCL Technologies' },
+    { symbol: 'AXISBANK.BO', market: 'bse', name: 'Axis Bank' },
+    { symbol: 'TATASTEEL.BO', market: 'bse', name: 'Tata Steel' },
+    { symbol: 'TITAN.BO', market: 'bse', name: 'Titan Company' }
+  ]},
+  { id: 'commodities', name: '🛢️ Commodities', stocks: [
+    { symbol: 'GC=F', market: 'stocks', name: 'Gold Futures' },
+    { symbol: 'SI=F', market: 'stocks', name: 'Silver Futures' },
+    { symbol: 'CL=F', market: 'stocks', name: 'Crude Oil WTI' },
+    { symbol: 'BZ=F', market: 'stocks', name: 'Brent Crude Oil' },
+    { symbol: 'NG=F', market: 'stocks', name: 'Natural Gas' },
+    { symbol: 'HG=F', market: 'stocks', name: 'Copper' },
+    { symbol: 'PL=F', market: 'stocks', name: 'Platinum' },
+    { symbol: 'PA=F', market: 'stocks', name: 'Palladium' },
+    { symbol: 'ZW=F', market: 'stocks', name: 'Wheat' },
+    { symbol: 'ZC=F', market: 'stocks', name: 'Corn' },
+    { symbol: 'ZS=F', market: 'stocks', name: 'Soybeans' },
+    { symbol: 'CT=F', market: 'stocks', name: 'Cotton' },
+    { symbol: 'KC=F', market: 'stocks', name: 'Coffee' },
+    { symbol: 'SB=F', market: 'stocks', name: 'Sugar' },
+    { symbol: 'CC=F', market: 'stocks', name: 'Cocoa' }
+  ]}
+];
+// Initialize AppState.watchlists from defaults
+AppState.watchlists = JSON.parse(JSON.stringify(DEFAULT_WATCHLISTS));
+
 // ==================== STORAGE ====================
 const Storage = {
   KEY: 'tradeview_pro_state',
   save() {
     const data = {
-      watchlist: AppState.watchlist,
+      watchlistVersion: WATCHLIST_VERSION,
       watchlists: AppState.watchlists,
       activeWatchlistId: AppState.activeWatchlistId,
       alerts: AppState.alerts,
@@ -910,29 +968,38 @@ const Storage = {
   restore() {
     const d = this.load();
     if (d) {
-      if (d.watchlists && d.watchlists.length) {
+      // Default watchlist IDs (built-in, not user-created)
+      const defaultIds = new Set(DEFAULT_WATCHLISTS.map(w => w.id));
+      const savedVersion = d.watchlistVersion || 0;
+
+      if (savedVersion < WATCHLIST_VERSION) {
+        // Version bumped — replace built-in watchlists with new defaults,
+        // but keep any user-created watchlists (scanner patterns, custom tabs)
+        const userWatchlists = (d.watchlists || []).filter(w => !defaultIds.has(w.id));
+        AppState.watchlists = [...JSON.parse(JSON.stringify(DEFAULT_WATCHLISTS)), ...userWatchlists];
+      } else if (d.watchlists && d.watchlists.length) {
         AppState.watchlists = d.watchlists;
-        AppState.activeWatchlistId = d.activeWatchlistId || d.watchlists[0].id;
-        const active = AppState.watchlists.find(w => w.id === AppState.activeWatchlistId);
-        AppState.watchlist = active ? active.stocks : (d.watchlist || []);
-      } else {
-        // No saved watchlists — migrate old single watchlist into the default one
-        AppState.watchlist = d.watchlist || [];
-        AppState.watchlists[0].stocks = AppState.watchlist;
-        AppState.activeWatchlistId = AppState.watchlists[0].id;
       }
+
+      AppState.activeWatchlistId = d.activeWatchlistId || AppState.watchlists[0].id;
+      const active = AppState.watchlists.find(w => w.id === AppState.activeWatchlistId);
+      AppState.watchlist = active ? active.stocks : AppState.watchlists[0].stocks;
+
       AppState.alerts = d.alerts || [];
       AppState.alertHistory = d.alertHistory || [];
       AppState.trendlines = d.trendlines || [];
       AppState.settings = { ...AppState.settings, ...d.settings };
-      AppState.currentSymbol = d.lastSymbol || 'BTCUSDT';
-      AppState.currentMarket = d.lastMarket || 'crypto';
-      AppState.currentTimeframe = d.lastTimeframe || '1h';
+      AppState.currentSymbol = d.lastSymbol || 'RELIANCE.NS';
+      AppState.currentMarket = d.lastMarket || 'nse';
+      AppState.currentTimeframe = d.lastTimeframe || '1D';
       AppState.activeIndicators = new Set(d.activeIndicators || ['volume']);
       AppState.chartType = d.chartType || 'candlestick';
       AppState.currentTheme = d.theme || 'dark';
+
+      // Save immediately if version bumped so new defaults persist
+      if (savedVersion < WATCHLIST_VERSION) this.save();
     } else {
-      // First visit — use default watchlists from AppState, set NSE as active
+      // First visit
       const active = AppState.watchlists.find(w => w.id === AppState.activeWatchlistId) || AppState.watchlists[0];
       AppState.watchlist = active.stocks;
       AppState.currentSymbol = 'RELIANCE.NS';
@@ -1490,34 +1557,52 @@ const TVChart = {
       yahooSymbol = symbol.replace('USDT', '-USD').replace('BUSD', '-USD').replace('USDC', '-USD');
     }
 
-    let proxyPath;
-    if (period1) {
-      const p2 = period2 || Math.floor(Date.now() / 1000);
-      proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?period1=${period1}&period2=${p2}&interval=${interval}`;
-    } else {
-      proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?range=${params.range}&interval=${interval}`;
+    // Build URL helper
+    const buildUrl = (range, p1, p2) => {
+      let proxyPath;
+      if (p1) {
+        const pp2 = p2 || Math.floor(Date.now() / 1000);
+        proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?period1=${p1}&period2=${pp2}&interval=${interval}`;
+      } else {
+        proxyPath = `/api/yahoo/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}`;
+      }
+      const serverUrl = AppState.settings.alertServerUrl;
+      if (serverUrl) return serverUrl + proxyPath;
+      if (window.location.protocol.startsWith('http')) return proxyPath;
+      const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=${range}&interval=${interval}`;
+      return `https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`;
+    };
+
+    const fetchAndParse = async (url) => {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Yahoo fetch failed: ${resp.status}`);
+      const data = await resp.json();
+      const result = data.chart?.result?.[0];
+      if (!result || !result.timestamp) throw new Error('No chart data');
+      const parsed = this._parseCandles(result, interval);
+      return { candles: parsed.candles, volumes: parsed.volumes, meta: result.meta };
+    };
+
+    // Primary fetch
+    let result = await fetchAndParse(buildUrl(params.range, period1, period2));
+
+    // If too few candles returned (Yahoo sometimes limits .BO/.NS with large ranges),
+    // retry with progressively smaller ranges
+    if (!period1 && result.candles.length < 5 && !this._isIntraday(interval)) {
+      const fallbackRanges = ['5y', '2y', '1y', '6mo', '3mo'];
+      for (const range of fallbackRanges) {
+        if (range === params.range) continue; // skip if same as original
+        try {
+          const retryResult = await fetchAndParse(buildUrl(range));
+          if (retryResult.candles.length > result.candles.length) {
+            result = retryResult;
+            if (result.candles.length >= 5) break; // good enough
+          }
+        } catch(e) { /* try next range */ }
+      }
     }
 
-    let url;
-    const serverUrl = AppState.settings.alertServerUrl;
-    if (serverUrl) {
-      url = serverUrl + proxyPath;
-    } else if (window.location.protocol.startsWith('http')) {
-      url = proxyPath;
-    } else {
-      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=${params.range}&interval=${interval}`;
-      url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
-    }
-
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Yahoo fetch failed: ${resp.status}`);
-    const data = await resp.json();
-
-    const result = data.chart?.result?.[0];
-    if (!result || !result.timestamp) throw new Error('No chart data');
-
-    const parsed = this._parseCandles(result, interval);
-    return { candles: parsed.candles, volumes: parsed.volumes, meta: result.meta };
+    return result;
   },
 
   _mergeData(existing, existingVol, newer, newerVol) {
