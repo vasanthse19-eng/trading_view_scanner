@@ -1168,6 +1168,7 @@ const API = {
 // ==================== TRADINGVIEW CHART WIDGET ====================
 const TVChart = {
   widget: null,
+  _observerStarted: false,
 
   // Convert our symbol format to TradingView format
   toTVSymbol(symbol, market) {
@@ -1188,11 +1189,58 @@ const TVChart = {
     return map[timeframe] || 'D';
   },
 
+  // Auto-dismiss TradingView "symbol not available" notification popups
+  _startPopupBlocker() {
+    if (this._observerStarted) return;
+    this._observerStarted = true;
+
+    const dismiss = (node) => {
+      if (node.nodeType !== 1) return;
+      // TradingView creates dialog overlays in the parent document
+      // Look for dialogs with "Ok" buttons that mention "only available on TradingView"
+      const text = node.textContent || '';
+      if (text.includes('only available on TradingView') || text.includes('This symbol is only available')) {
+        const okBtn = node.querySelector('button');
+        if (okBtn) { okBtn.click(); return; }
+        node.style.display = 'none';
+        try { node.remove(); } catch(e) {}
+      }
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          dismiss(node);
+          // Also check children (dialog might be nested)
+          if (node.querySelectorAll) {
+            node.querySelectorAll('div').forEach(child => {
+              const t = child.textContent || '';
+              if (t.includes('only available on TradingView')) {
+                // Walk up to find the overlay/dialog root and dismiss
+                let el = child;
+                while (el.parentElement && el.parentElement !== document.body) el = el.parentElement;
+                if (el && el !== document.documentElement) {
+                  const btn = el.querySelector('button');
+                  if (btn) btn.click();
+                  else { el.style.display = 'none'; try { el.remove(); } catch(e) {} }
+                }
+              }
+            });
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  },
+
   load(symbol, market, timeframe) {
     const container = document.getElementById('tv-widget-container');
     if (!container) return;
     // Clear previous widget
     container.innerHTML = '';
+
+    // Start popup blocker on first load
+    this._startPopupBlocker();
 
     const tvSymbol = this.toTVSymbol(symbol, market);
     const tvInterval = this.toTVInterval(timeframe || AppState.currentTimeframe);
