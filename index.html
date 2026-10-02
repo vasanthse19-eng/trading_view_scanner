@@ -377,7 +377,8 @@
         </div>
       </div>
       <div class="toolbar-section">
-        <a href="/api/scanner/dashboard" class="icon-btn" title="Pattern Scanner" style="text-decoration:none;font-size:16px;">📊</a>
+        <button class="icon-btn" id="btn-run-scan" title="Run Pattern Scan" style="font-size:14px;color:var(--accent-green,#26a69a);">▶ Scan</button>
+        <a id="scanner-link" href="/api/scanner/dashboard" class="icon-btn" title="Scanner Dashboard" style="text-decoration:none;font-size:16px;">📊</a>
         <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
         <button class="icon-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
       </div>
@@ -2700,6 +2701,48 @@ const UIController = {
     document.getElementById('btn-fullscreen').addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen();
+    });
+
+    // Scanner: auto-detect base URL for scanner links
+    const scannerBase = (() => {
+      const s = AppState.settings.alertServerUrl;
+      if (s) return s;
+      if (window.location.protocol.startsWith('http')) return window.location.origin;
+      return 'https://trading-view-scanner.onrender.com';
+    })();
+    const scannerLink = document.getElementById('scanner-link');
+    if (scannerLink) scannerLink.href = `${scannerBase}/api/scanner/dashboard`;
+
+    // Run Scan button
+    document.getElementById('btn-run-scan').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-run-scan');
+      const origText = btn.innerHTML;
+      btn.innerHTML = '⏳ Scanning...';
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      try {
+        const resp = await fetch(`${scannerBase}/api/scanner/run`, { method: 'POST' });
+        if (!resp.ok) throw new Error(`Scan failed: ${resp.status}`);
+        const data = await resp.json();
+        btn.innerHTML = '✅ Done!';
+        setTimeout(() => {
+          btn.innerHTML = origText;
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 2000);
+        // Open dashboard with results
+        if (confirm(`Scan complete! ${data.totalPatterns || 0} patterns found. Open dashboard?`)) {
+          window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
+        }
+      } catch(e) {
+        btn.innerHTML = '❌ Failed';
+        console.error('Scan error:', e);
+        setTimeout(() => {
+          btn.innerHTML = origText;
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 3000);
+      }
     });
 
     // Add to watchlist button focuses search
