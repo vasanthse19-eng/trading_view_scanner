@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TradeView Pro — Free Trading Terminal</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
-  <script src="https://s3.tradingview.com/tv.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -441,6 +441,15 @@
           <button class="chart-type-btn" data-type="area" title="Area">▦</button>
           <button class="chart-type-btn" data-type="heikinashi" title="Heikin-Ashi">HA</button>
         </div>
+      </div>
+      <div class="toolbar-section center">
+        <button class="tf-btn" data-tf="1m">1m</button>
+        <button class="tf-btn" data-tf="5m">5m</button>
+        <button class="tf-btn" data-tf="15m">15m</button>
+        <button class="tf-btn" data-tf="1h">1h</button>
+        <button class="tf-btn active" data-tf="1D">1D</button>
+        <button class="tf-btn" data-tf="1W">1W</button>
+        <button class="tf-btn" data-tf="1M">1M</button>
       </div>
       <div class="toolbar-section">
         <button class="icon-btn" id="btn-run-scan" title="Run Pattern Scan" style="font-size:14px;color:var(--accent-green,#26a69a);">▶ Scan</button>
@@ -1165,117 +1174,223 @@ const API = {
   }
 };
 
-// ==================== TRADINGVIEW CHART WIDGET ====================
+// ==================== CHART (Lightweight Charts + Yahoo Finance) ====================
 const TVChart = {
-  widget: null,
-  _observerStarted: false,
+  chart: null,
+  candleSeries: null,
+  volumeSeries: null,
+  _loading: false,
 
-  // Convert our symbol format to TradingView format
-  toTVSymbol(symbol, market) {
-    if (market === 'crypto') return `BINANCE:${symbol}`;
-    if (market === 'nse') return `NSE:${symbol.replace('.NS', '')}`;
-    if (market === 'bse') return `BSE:${symbol.replace('.BO', '')}`;
-    // US stocks — just use symbol directly
-    return symbol;
-  },
+  init() {
+    const container = document.getElementById('tv-widget-container');
+    if (!container || this.chart) return;
 
-  // Map our timeframe to TradingView interval
-  toTVInterval(timeframe) {
-    const map = {
-      '1m': '1', '5m': '5', '15m': '15', '1h': '60',
-      '2h': '120', '4h': '240', '1D': 'D', '3D': '3D',
-      '1W': 'W', '1M': 'M'
-    };
-    return map[timeframe] || 'D';
-  },
-
-  // Auto-dismiss TradingView "symbol not available" notification popups
-  _startPopupBlocker() {
-    if (this._observerStarted) return;
-    this._observerStarted = true;
-
-    const dismiss = (node) => {
-      if (node.nodeType !== 1) return;
-      // TradingView creates dialog overlays in the parent document
-      // Look for dialogs with "Ok" buttons that mention "only available on TradingView"
-      const text = node.textContent || '';
-      if (text.includes('only available on TradingView') || text.includes('This symbol is only available')) {
-        const okBtn = node.querySelector('button');
-        if (okBtn) { okBtn.click(); return; }
-        node.style.display = 'none';
-        try { node.remove(); } catch(e) {}
-      }
-    };
-
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          dismiss(node);
-          // Also check children (dialog might be nested)
-          if (node.querySelectorAll) {
-            node.querySelectorAll('div').forEach(child => {
-              const t = child.textContent || '';
-              if (t.includes('only available on TradingView')) {
-                // Walk up to find the overlay/dialog root and dismiss
-                let el = child;
-                while (el.parentElement && el.parentElement !== document.body) el = el.parentElement;
-                if (el && el !== document.documentElement) {
-                  const btn = el.querySelector('button');
-                  if (btn) btn.click();
-                  else { el.style.display = 'none'; try { el.remove(); } catch(e) {} }
-                }
-              }
-            });
-          }
+    const isDark = AppState.currentTheme !== 'light';
+    this.chart = LightweightCharts.createChart(container, {
+      width: container.clientWidth,
+      height: container.clientHeight,
+      layout: {
+        background: { type: 'solid', color: isDark ? '#0b0e11' : '#ffffff' },
+        textColor: isDark ? '#d1d4dc' : '#191919',
+      },
+      grid: {
+        vertLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
+        horzLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: isDark ? '#2d3348' : '#e0e0e0' },
+      timeScale: {
+        borderColor: isDark ? '#2d3348' : '#e0e0e0',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      localization: {
+        priceFormatter: (price) => {
+          const m = AppState.currentMarket;
+          const curr = (m === 'nse' || m === 'bse') ? '₹' : '$';
+          if (Math.abs(price) >= 1) return curr + price.toFixed(2);
+          return curr + price.toFixed(6);
         }
       }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+
+    this.candleSeries = this.chart.addCandlestickSeries({
+      upColor: '#26a69a', downColor: '#ef5350',
+      borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    });
+
+    this.volumeSeries = this.chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+    });
+    this.chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    // Responsive resize
+    this._resizeHandler = () => {
+      if (this.chart && container.clientWidth > 0) {
+        this.chart.resize(container.clientWidth, container.clientHeight);
+      }
+    };
+    window.addEventListener('resize', this._resizeHandler);
+    new ResizeObserver(this._resizeHandler).observe(container);
   },
 
-  load(symbol, market, timeframe) {
+  _getTimeframeParams(timeframe) {
+    const map = {
+      '1m':  { range: '1d',  interval: '1m' },
+      '5m':  { range: '5d',  interval: '5m' },
+      '15m': { range: '10d', interval: '15m' },
+      '1h':  { range: '1mo', interval: '60m' },
+      '2h':  { range: '3mo', interval: '60m' },  // Yahoo doesn't have 2h, use 1h
+      '4h':  { range: '6mo', interval: '60m' },  // Yahoo doesn't have 4h, use 1h
+      '1D':  { range: '2y',  interval: '1d' },
+      '3D':  { range: '5y',  interval: '1d' },   // Use daily, user sees bigger range
+      '1W':  { range: '10y', interval: '1wk' },
+      '1M':  { range: 'max', interval: '1mo' },
+    };
+    return map[timeframe] || { range: '2y', interval: '1d' };
+  },
+
+  async _fetchYahooData(symbol, timeframe) {
+    const { range, interval } = this._getTimeframeParams(timeframe);
+    const proxyPath = `/api/yahoo/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+
+    let url;
+    const serverUrl = AppState.settings.alertServerUrl;
+    if (serverUrl) {
+      url = serverUrl + proxyPath;
+    } else if (window.location.protocol.startsWith('http')) {
+      url = proxyPath;
+    } else {
+      // Fallback to allorigins
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+      url = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
+    }
+
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Yahoo fetch failed: ${resp.status}`);
+    const data = await resp.json();
+
+    const result = data.chart?.result?.[0];
+    if (!result || !result.timestamp) throw new Error('No chart data');
+
+    const ts = result.timestamp;
+    const q = result.indicators?.quote?.[0];
+    if (!q) throw new Error('No quote data');
+
+    const candles = [];
+    const volumes = [];
+    for (let i = 0; i < ts.length; i++) {
+      if (q.open?.[i] != null && q.close?.[i] != null && q.high?.[i] != null && q.low?.[i] != null) {
+        // Lightweight Charts expects time as UTC timestamp in seconds for intraday,
+        // or YYYY-MM-DD string for daily+
+        const isIntraday = ['1m','5m','15m','60m','2m'].includes(interval);
+        const time = isIntraday ? ts[i] : ts[i]; // Both use Unix timestamp
+
+        candles.push({
+          time: ts[i],
+          open: q.open[i],
+          high: q.high[i],
+          low: q.low[i],
+          close: q.close[i],
+        });
+        volumes.push({
+          time: ts[i],
+          value: q.volume?.[i] || 0,
+          color: q.close[i] >= q.open[i] ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+        });
+      }
+    }
+
+    return { candles, volumes, meta: result.meta };
+  },
+
+  async load(symbol, market, timeframe) {
+    if (this._loading) return;
+    this._loading = true;
+
+    // Show loading state
     const container = document.getElementById('tv-widget-container');
-    if (!container) return;
-    // Clear previous widget
-    container.innerHTML = '';
+    let loadingEl = container.querySelector('.chart-loading-overlay');
+    if (!loadingEl) {
+      loadingEl = document.createElement('div');
+      loadingEl.className = 'chart-loading-overlay';
+      loadingEl.innerHTML = '<div class="chart-loading-spinner"></div><div class="chart-loading-text">Loading chart...</div>';
+      container.appendChild(loadingEl);
+    }
+    loadingEl.classList.remove('hidden');
 
-    // Start popup blocker on first load
-    this._startPopupBlocker();
-
-    const tvSymbol = this.toTVSymbol(symbol, market);
-    const tvInterval = this.toTVInterval(timeframe || AppState.currentTimeframe);
+    // Initialize chart if needed
+    if (!this.chart) this.init();
 
     try {
-      this.widget = new TradingView.widget({
-        container_id: 'tv-widget-container',
-        autosize: true,
-        symbol: tvSymbol,
-        interval: tvInterval,
-        timezone: 'Asia/Kolkata',
-        theme: AppState.currentTheme === 'light' ? 'light' : 'dark',
-        style: '1', // candlestick
-        locale: 'en',
-        toolbar_bg: '#1a1a2e',
-        enable_publishing: false,
-        allow_symbol_change: true,
-        save_image: true,
-        hide_top_toolbar: false,
-        hide_legend: false,
-        hide_side_toolbar: false,
-        withdateranges: true,
-        details: true,
-        hotlist: false,
-        calendar: false,
-        studies: ['Volume@tv-basicstudies'],
-        show_popup_button: true,
-        popup_width: '1000',
-        popup_height: '650',
-        support_host: 'https://www.tradingview.com'
+      const { candles, volumes, meta } = await this._fetchYahooData(symbol, timeframe || AppState.currentTimeframe);
+
+      if (candles.length === 0) throw new Error('No candle data returned');
+
+      // Update series
+      this.candleSeries.setData(candles);
+      this.volumeSeries.setData(volumes);
+      this.chart.timeScale().fitContent();
+
+      // Update theme colors if needed
+      const isDark = AppState.currentTheme !== 'light';
+      this.chart.applyOptions({
+        layout: {
+          background: { type: 'solid', color: isDark ? '#0b0e11' : '#ffffff' },
+          textColor: isDark ? '#d1d4dc' : '#191919',
+        }
       });
+
+      // Update info bar
+      const lastCandle = candles[candles.length - 1];
+      if (lastCandle) {
+        AppState.candles = candles;
+        UIController.updateChartInfoBar({
+          open: lastCandle.open, high: lastCandle.high,
+          low: lastCandle.low, close: lastCandle.close
+        });
+      }
+
+      // Update status
+      StatusBar.update(true, `Yahoo Finance (${candles.length} candles)`);
+
+      // Hide loading
+      loadingEl.classList.add('hidden');
+
     } catch(e) {
-      console.error('TradingView widget error:', e);
-      container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:16px;">Failed to load chart. Please refresh.</div>';
+      console.error('Chart load error:', e);
+      loadingEl.innerHTML = `<div class="error-icon">⚠️</div><div class="error-text">${e.message}</div><button class="retry-btn" onclick="TVChart.load('${symbol}','${market}','${timeframe}')">Retry</button>`;
+      StatusBar.update(false, 'Error loading chart');
+    } finally {
+      this._loading = false;
     }
+  },
+
+  // Called when theme changes
+  applyTheme(themeName) {
+    if (!this.chart) return;
+    const isDark = themeName !== 'light';
+    this.chart.applyOptions({
+      layout: {
+        background: { type: 'solid', color: isDark ? '#0b0e11' : '#ffffff' },
+        textColor: isDark ? '#d1d4dc' : '#191919',
+      },
+      grid: {
+        vertLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
+        horzLines: { color: isDark ? 'rgba(45,51,72,0.5)' : 'rgba(0,0,0,0.06)' },
+      }
+    });
+  },
+
+  destroy() {
+    if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
+    if (this.chart) { this.chart.remove(); this.chart = null; }
+    this.candleSeries = null;
+    this.volumeSeries = null;
   }
 };
 
@@ -1664,9 +1779,9 @@ const PanelResizer = {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
       this.saveWidths();
-      // Trigger TradingView widget resize
-      if (TVChart.widget && TVChart.widget.resize) {
-        try { TVChart.widget.resize(); } catch(e) {}
+      // Trigger chart resize
+      if (TVChart.chart && TVChart._resizeHandler) {
+        try { TVChart._resizeHandler(); } catch(e) {}
       }
       window.dispatchEvent(new Event('resize'));
     };
@@ -2227,25 +2342,60 @@ const UIController = {
     document.getElementById('btn-run-scan').addEventListener('click', async () => {
       const btn = document.getElementById('btn-run-scan');
       const origText = btn.innerHTML;
-      btn.innerHTML = '⏳ Scanning...';
       btn.disabled = true;
       btn.style.opacity = '0.6';
       try {
+        // Start scan (returns immediately — scan runs in background)
         const resp = await fetch(`${scannerBase}/api/scanner/run`, { method: 'POST' });
-        if (!resp.ok) throw new Error(`Scan failed: ${resp.status}`);
-        const data = await resp.json();
-        btn.innerHTML = '✅ Done!';
-        setTimeout(() => {
-          btn.innerHTML = origText;
-          btn.disabled = false;
-          btn.style.opacity = '1';
-        }, 2000);
-        // Refresh pattern watchlists from scan results
-        WatchlistManager.loadPatternWatchlists();
-        // Open dashboard with results
-        if (confirm(`Scan complete! ${data.totalPatterns || 0} patterns found. Open dashboard?`)) {
-          window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          if (resp.status === 409) {
+            btn.innerHTML = '⏳ Already running...';
+          } else {
+            throw new Error(errData.error || `Scan failed: ${resp.status}`);
+          }
         }
+
+        // Poll for progress until scan completes
+        btn.innerHTML = '⏳ 0%...';
+        let attempts = 0;
+        const maxAttempts = 600; // 10 min max (600 × 1s)
+        const pollStatus = async () => {
+          while (attempts < maxAttempts) {
+            attempts++;
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+              const statusResp = await fetch(`${scannerBase}/api/scanner/status`);
+              const status = await statusResp.json();
+              if (status.running) {
+                const p = status.progress || {};
+                const pct = p.total > 0 ? Math.round(p.scanned / p.total * 100) : 0;
+                const phase = (p.phase || '').replace(/_/g, ' ');
+                btn.innerHTML = `⏳ ${phase} ${pct}%`;
+              } else {
+                // Scan finished
+                const meta = status.lastMeta;
+                const patternsFound = meta ? meta.patternsFound : 0;
+                btn.innerHTML = `✅ ${patternsFound} patterns!`;
+                setTimeout(() => {
+                  btn.innerHTML = origText;
+                  btn.disabled = false;
+                  btn.style.opacity = '1';
+                }, 3000);
+                // Refresh pattern watchlists
+                WatchlistManager.loadPatternWatchlists();
+                if (patternsFound > 0 && confirm(`Scan complete! ${patternsFound} patterns found in ${meta.stocksScanned} stocks. Open dashboard?`)) {
+                  window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
+                }
+                return;
+              }
+            } catch(e) { /* keep polling */ }
+          }
+          // Timed out
+          btn.innerHTML = '⏰ Still running...';
+          setTimeout(() => { btn.innerHTML = origText; btn.disabled = false; btn.style.opacity = '1'; }, 3000);
+        };
+        await pollStatus();
       } catch(e) {
         btn.innerHTML = '❌ Failed';
         console.error('Scan error:', e);
@@ -2256,6 +2406,23 @@ const UIController = {
         }, 3000);
       }
     });
+
+    // Timeframe buttons
+    document.querySelectorAll('.tf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        AppState.currentTimeframe = btn.dataset.tf;
+        Storage.save();
+        TVChart.load(AppState.currentSymbol, AppState.currentMarket, AppState.currentTimeframe);
+      });
+    });
+    // Set active timeframe button on load
+    const activeTfBtn = document.querySelector(`.tf-btn[data-tf="${AppState.currentTimeframe}"]`);
+    if (activeTfBtn) {
+      document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+      activeTfBtn.classList.add('active');
+    }
 
     // Add to watchlist button focuses search
     document.getElementById('btn-add-watchlist').addEventListener('click', () => {
@@ -2309,7 +2476,7 @@ function applyTheme(name) {
   r.setProperty('--color-bullish', t.bullish);
   r.setProperty('--color-bearish', t.bearish);
   r.setProperty('--accent-blue', t.accent);
-  // TradingView widget handles its own theme via the theme option in TVChart.load
+  if (typeof TVChart !== 'undefined' && TVChart.applyTheme) TVChart.applyTheme(name);
 }
 
 // ==================== MAIN APP ====================
