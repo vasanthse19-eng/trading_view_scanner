@@ -8,7 +8,7 @@ const scanner = require('./index');
 
 const router = express.Router();
 
-// ── POST /api/scanner/run — Trigger manual scan ──────────
+// ── POST /api/scanner/run — Trigger scan (optionally per-timeframe) ──
 router.post('/run', async (req, res) => {
   const state = scanner.getState();
   if (state.running) {
@@ -18,29 +18,41 @@ router.post('/run', async (req, res) => {
     });
   }
 
-  // Get options from request body
-  const { batchSize, skipTelegram } = req.body || {};
+  const { batchSize, skipTelegram, timeframe } = req.body || {};
 
-  // Start scan in background (don't await — return immediately)
+  // Normalize timeframe input: string → array, validate
+  let timeframes = null; // null = all
+  if (timeframe) {
+    const valid = ['hourly', 'daily', 'weekly'];
+    if (typeof timeframe === 'string') {
+      timeframes = valid.includes(timeframe) ? [timeframe] : null;
+    } else if (Array.isArray(timeframe)) {
+      timeframes = timeframe.filter(t => valid.includes(t));
+      if (timeframes.length === 0) timeframes = null;
+    }
+  }
+
   const scanPromise = scanner.runScan({
     sendTelegram: req.app.locals.sendTelegram || null,
     dashboardUrl: req.app.locals.dashboardUrl || '',
     batchSize: batchSize || 5,
-    skipTelegram: skipTelegram || false
+    skipTelegram: skipTelegram || false,
+    timeframes,
   });
 
-  // Handle completion logging
+  const tfLabel = timeframes ? timeframes.join(', ') : 'all';
+
   scanPromise
     .then(({ meta }) => {
-      console.log(`✅ Manual scan completed: ${meta.patternsFound} patterns found`);
+      console.log(`✅ Manual scan (${tfLabel}) completed: ${meta.patternsFound} patterns found`);
     })
     .catch(err => {
-      console.error('❌ Manual scan failed:', err.message);
+      console.error(`❌ Manual scan (${tfLabel}) failed:`, err.message);
     });
 
   res.json({
     success: true,
-    message: 'Scan started in background',
+    message: `Scan started for ${tfLabel} timeframe(s)`,
     progress: scanner.getState().progress
   });
 });
@@ -52,7 +64,8 @@ router.get('/status', (req, res) => {
     running: state.running,
     progress: state.progress,
     lastScan: state.lastScan,
-    lastMeta: state.lastMeta
+    lastMeta: state.lastMeta,
+    timeframeMeta: state.timeframeMeta || {},
   });
 });
 
@@ -61,7 +74,6 @@ router.get('/results', (req, res) => {
   const state = scanner.getState();
 
   if (!state.lastResults || state.lastResults.length === 0) {
-    // Try loading from file
     try {
       const filePath = scanner.RESULTS_FILE;
       if (fs.existsSync(filePath)) {
@@ -72,7 +84,6 @@ router.get('/results', (req, res) => {
     return res.json({ results: [], meta: null, message: 'No scan results yet. Trigger a scan via POST /api/scanner/run' });
   }
 
-  // Support filters via query params
   let results = [...state.lastResults];
   const { pattern, direction, timeframe, minConfidence, search, limit } = req.query;
 
@@ -94,7 +105,7 @@ router.get('/results', (req, res) => {
     results = results.filter(r =>
       r.symbol.toLowerCase().includes(q) ||
       r.name.toLowerCase().includes(q) ||
-      r.sector.toLowerCase().includes(q)
+      (r.sector || '').toLowerCase().includes(q)
     );
   }
   if (limit) {
@@ -102,6 +113,12 @@ router.get('/results', (req, res) => {
   }
 
   res.json({ results, meta: state.lastMeta });
+});
+
+// ── GET /api/scanner/history — Scan history ──────────────
+router.get('/history', (req, res) => {
+  const history = scanner.loadHistory();
+  res.json({ history });
 });
 
 // ── GET /api/scanner/dashboard — Serve the HTML dashboard ──
@@ -114,7 +131,7 @@ router.get('/dashboard', (req, res) => {
       <html><body style="background:#0a0e17;color:#d1d4dc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
         <div style="text-align:center;">
           <h1>📊 No Scan Results Yet</h1>
-          <p>Trigger a scan via POST /api/scanner/run</p>
+          <p>Trigger a scan via the dashboard buttons or POST /api/scanner/run</p>
           <p style="color:#787b86;">The scanner runs automatically daily at 7:00 PM IST</p>
         </div>
       </body></html>
@@ -122,7 +139,7 @@ router.get('/dashboard', (req, res) => {
   }
 });
 
-// ── GET /api/scanner/symbols — List all scan symbols (multi-market) ──────
+// ── GET /api/scanner/symbols — List all scan symbols (multi-market) ──
 router.get('/symbols', (req, res) => {
   const { buildSymbolList } = require('./index');
   const { sector, search, limit, market } = req.query;
@@ -144,7 +161,6 @@ router.get('/symbols', (req, res) => {
   const total = symbols.length;
   if (limit) symbols = symbols.slice(0, parseInt(limit));
 
-  // Get unique sectors for filter
   const sectors = [...new Set(symbols.map(s => s.sector))].sort();
 
   res.json({ symbols, total, sectors });

@@ -556,7 +556,8 @@ app.listen(PORT, async () => {
         await scanner.runScan({
           sendTelegram,
           dashboardUrl: app.locals.dashboardUrl,
-          batchSize: 5
+          batchSize: 5,
+          timeframes: ['daily', 'weekly']  // Skip hourly to avoid Yahoo rate limits
         });
       } catch (e) {
         console.error('❌ Scheduled scan error:', e.message);

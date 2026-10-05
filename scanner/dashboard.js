@@ -516,10 +516,14 @@ td.sparkline-cell svg { display: block; }
     <a href="/" class="nav-link">Charts</a>
     <a href="/api/scanner/dashboard" class="nav-link active" id="navScannerLink">Scanner</a>
     <button type="button" class="nav-link" id="stockListToggleBtn">Stock List</button>
+    <button type="button" class="nav-link" id="historyToggleBtn">History</button>
   </div>
   <div class="nav-actions">
     <button type="button" class="scan-btn secondary" id="refreshBtn">Refresh</button>
-    <button type="button" class="scan-btn" id="runScanBtn">Run Scan</button>
+    <button type="button" class="scan-btn" data-timeframe="hourly">Scan 1H</button>
+    <button type="button" class="scan-btn" data-timeframe="daily">Scan Daily</button>
+    <button type="button" class="scan-btn" data-timeframe="weekly">Scan Weekly</button>
+    <button type="button" class="scan-btn" data-timeframe="all" style="background:#1e53e5">Scan All</button>
   </div>
 </div>
 
@@ -527,6 +531,19 @@ td.sparkline-cell svg { display: block; }
 <div class="scan-progress hidden" id="scanProgress">
   <div class="scan-progress-bar"><div class="scan-progress-fill" id="scanProgressFill"></div></div>
   <div class="scan-progress-text" id="scanProgressText">Starting scan...</div>
+</div>
+
+<!-- HISTORY PANEL (collapsible) -->
+<div id="historyPanel" style="display:none;max-width:1400px;margin:12px auto;padding:0 16px;">
+  <div style="background:#131722;border:1px solid #2a2e3e;border-radius:8px;overflow:hidden;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #2a2e3e;">
+      <h3 style="font-size:0.95rem;color:#d1d4dc;margin:0;">📋 Scan History (Last 20)</h3>
+      <button class="scan-btn secondary" id="historyCloseBtn" style="font-size:0.75rem;padding:3px 10px;">Close</button>
+    </div>
+    <div id="historyList" style="max-height:300px;overflow-y:auto;">
+      <div style="color:#787b86;text-align:center;padding:16px;">Loading...</div>
+    </div>
+  </div>
 </div>
 
 <!-- HEADER -->
@@ -925,7 +942,7 @@ td.sparkline-cell svg { display: block; }
     window.location.reload();
   });
 
-  /* ===== RUN SCAN ===== */
+  /* ===== RUN SCAN (per-timeframe buttons) ===== */
   var scanPollTimer = null;
 
   function setScanProgress(pct, message) {
@@ -933,6 +950,14 @@ td.sparkline-cell svg { display: block; }
     var text = document.getElementById('scanProgressText');
     fill.style.width = Math.max(0, Math.min(100, pct || 0)) + '%';
     text.textContent = message || '';
+  }
+
+  function enableScanButtons() {
+    document.querySelectorAll('[data-timeframe]').forEach(function(b) { b.disabled = false; });
+  }
+
+  function disableScanButtons() {
+    document.querySelectorAll('[data-timeframe]').forEach(function(b) { b.disabled = true; });
   }
 
   function pollScanStatus() {
@@ -946,6 +971,7 @@ td.sparkline-cell svg { display: block; }
         var phaseLabels = {
           idle: 'Idle',
           starting: 'Starting scan...',
+          fetching_hourly: 'Fetching hourly (1H) data...',
           fetching_daily: 'Fetching daily data...',
           fetching_weekly: 'Fetching weekly data...',
           analyzing: 'Analyzing patterns...',
@@ -963,8 +989,7 @@ td.sparkline-cell svg { display: block; }
           scanPollTimer = null;
           if (prog.phase === 'error') {
             setScanProgress(pct, 'Scan failed');
-            var btn = document.getElementById('runScanBtn');
-            if (btn) btn.disabled = false;
+            enableScanButtons();
           } else {
             setScanProgress(100, 'Scan complete. Reloading...');
             setTimeout(function() { window.location.reload(); }, 800);
@@ -975,26 +1000,36 @@ td.sparkline-cell svg { display: block; }
         clearInterval(scanPollTimer);
         scanPollTimer = null;
         setScanProgress(0, 'Error checking scan status');
-        var btn = document.getElementById('runScanBtn');
-        if (btn) btn.disabled = false;
+        enableScanButtons();
       });
   }
 
-  document.getElementById('runScanBtn').addEventListener('click', function() {
-    var btn = this;
-    btn.disabled = true;
-    var progress = document.getElementById('scanProgress');
-    progress.classList.remove('hidden');
-    setScanProgress(0, 'Starting scan...');
+  document.querySelectorAll('[data-timeframe]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var tf = this.getAttribute('data-timeframe');
+      disableScanButtons();
 
-    fetch('/api/scanner/run', { method: 'POST' })
+      var progress = document.getElementById('scanProgress');
+      progress.classList.remove('hidden');
+      setScanProgress(0, 'Starting ' + (tf === 'all' ? 'full' : tf) + ' scan...');
+
+      var body = {};
+      if (tf !== 'all') {
+        body.timeframe = tf;
+      }
+
+      fetch('/api/scanner/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
       .then(function(res) {
         return res.json().then(function(data) { return { ok: res.ok, data: data }; });
       })
       .then(function(result) {
         if (!result.ok) {
           setScanProgress(0, (result.data && result.data.error) || 'Failed to start scan');
-          btn.disabled = false;
+          enableScanButtons();
           return;
         }
         if (scanPollTimer) clearInterval(scanPollTimer);
@@ -1003,9 +1038,69 @@ td.sparkline-cell svg { display: block; }
       })
       .catch(function() {
         setScanProgress(0, 'Failed to start scan');
-        btn.disabled = false;
+        enableScanButtons();
       });
+    });
   });
+
+  /* ===== SCAN HISTORY ===== */
+  var historyLoaded = false;
+
+  document.getElementById('historyToggleBtn').addEventListener('click', function() {
+    var panel = document.getElementById('historyPanel');
+    if (panel.style.display === 'none') {
+      panel.style.display = 'block';
+      this.classList.add('active');
+      if (!historyLoaded) loadScanHistory();
+    } else {
+      panel.style.display = 'none';
+      this.classList.remove('active');
+    }
+  });
+
+  document.getElementById('historyCloseBtn').addEventListener('click', function() {
+    document.getElementById('historyPanel').style.display = 'none';
+    document.getElementById('historyToggleBtn').classList.remove('active');
+  });
+
+  function loadScanHistory() {
+    fetch('/api/scanner/history')
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        historyLoaded = true;
+        var list = document.getElementById('historyList');
+        var items = (data && data.history) || [];
+        if (items.length === 0) {
+          list.innerHTML = '<div style="color:#787b86;text-align:center;padding:16px;">No scan history yet</div>';
+          return;
+        }
+        var html = '';
+        items.forEach(function(h) {
+          var timeStr = new Date(h.timestamp).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short',
+            hour: 'numeric', minute: '2-digit', hour12: true
+          });
+          var tfLabel = (h.timeframes || []).map(function(t) {
+            return t === 'hourly' ? '1H' : t.charAt(0).toUpperCase() + t.slice(1);
+          }).join(', ') || 'All';
+          var durMin = Math.floor((h.duration || 0) / 60);
+          var durSec = (h.duration || 0) % 60;
+          var statusDot = h.status === 'success' ? '#26a69a' : '#ef5350';
+          var errText = h.errorMessage ? ' — ' + h.errorMessage : '';
+          html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #1e2235;font-size:0.85rem;">';
+          html += '<div style="width:8px;height:8px;border-radius:50%;background:' + statusDot + ';flex-shrink:0;"></div>';
+          html += '<div style="color:#787b86;min-width:130px;">' + timeStr + '</div>';
+          html += '<div style="color:#2962ff;font-weight:600;min-width:80px;">' + escapeHtml(tfLabel) + '</div>';
+          html += '<div style="color:#d1d4dc;">' + (h.patternsFound || 0) + ' patterns / ' + (h.symbolsScanned || 0) + ' symbols' + escapeHtml(errText) + '</div>';
+          html += '<div style="color:#787b86;margin-left:auto;white-space:nowrap;">' + durMin + 'm ' + durSec + 's</div>';
+          html += '</div>';
+        });
+        list.innerHTML = html;
+      })
+      .catch(function() {
+        document.getElementById('historyList').innerHTML = '<div style="color:#ef5350;text-align:center;padding:16px;">Failed to load history</div>';
+      });
+  }
 
   /* ===== STOCK LIST VIEW ===== */
   var stockListData = [];
