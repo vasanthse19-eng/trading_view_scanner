@@ -487,7 +487,16 @@
         <button class="tf-btn" data-tf="1M">1M</button>
       </div>
       <div class="toolbar-section">
-        <button class="icon-btn" id="btn-run-scan" title="Run Pattern Scan" style="font-size:14px;color:var(--accent-green,#26a69a);">▶ Scan</button>
+        <div style="position:relative;display:inline-block;" id="scan-dropdown-wrap">
+          <button class="icon-btn" id="btn-run-scan" title="Run Pattern Scan" style="font-size:14px;color:var(--accent-green,#26a69a);">▶ Scan ▾</button>
+          <div id="scan-dropdown" style="display:none;position:absolute;top:100%;right:0;z-index:999;background:#1e222d;border:1px solid #363a45;border-radius:6px;padding:4px 0;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,0.4);">
+            <button class="scan-tf-opt" data-scan-tf="hourly" style="display:block;width:100%;text-align:left;background:none;border:none;color:#d1d4dc;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">⏱ Scan 1H</button>
+            <button class="scan-tf-opt" data-scan-tf="daily" style="display:block;width:100%;text-align:left;background:none;border:none;color:#d1d4dc;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">📅 Scan Daily</button>
+            <button class="scan-tf-opt" data-scan-tf="weekly" style="display:block;width:100%;text-align:left;background:none;border:none;color:#d1d4dc;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">📆 Scan Weekly</button>
+            <div style="border-top:1px solid #363a45;margin:4px 0;"></div>
+            <button class="scan-tf-opt" data-scan-tf="all" style="display:block;width:100%;text-align:left;background:none;border:none;color:#26a69a;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;font-family:inherit;">🔍 Scan All</button>
+          </div>
+        </div>
         <a id="scanner-link" href="/api/scanner/dashboard" class="icon-btn" title="Scanner Dashboard" style="text-decoration:none;font-size:16px;">📊</a>
         <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
         <button class="icon-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
@@ -2784,73 +2793,101 @@ const UIController = {
     const scannerLink = document.getElementById('scanner-link');
     if (scannerLink) scannerLink.href = `${scannerBase}/api/scanner/dashboard`;
 
-    // Run Scan button
-    document.getElementById('btn-run-scan').addEventListener('click', async () => {
-      const btn = document.getElementById('btn-run-scan');
-      const origText = btn.innerHTML;
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
-      try {
-        // Start scan (returns immediately — scan runs in background)
-        const resp = await fetch(`${scannerBase}/api/scanner/run`, { method: 'POST' });
-        if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({}));
-          if (resp.status === 409) {
-            btn.innerHTML = '⏳ Already running...';
-          } else {
-            throw new Error(errData.error || `Scan failed: ${resp.status}`);
-          }
-        }
+    // Run Scan dropdown + per-timeframe buttons
+    const scanBtn = document.getElementById('btn-run-scan');
+    const scanDropdown = document.getElementById('scan-dropdown');
 
-        // Poll for progress until scan completes
-        btn.innerHTML = '⏳ 0%...';
-        let attempts = 0;
-        const maxAttempts = 600; // 10 min max (600 × 1s)
-        const pollStatus = async () => {
-          while (attempts < maxAttempts) {
-            attempts++;
-            await new Promise(r => setTimeout(r, 2000));
-            try {
-              const statusResp = await fetch(`${scannerBase}/api/scanner/status`);
-              const status = await statusResp.json();
-              if (status.running) {
-                const p = status.progress || {};
-                const pct = p.total > 0 ? Math.round(p.scanned / p.total * 100) : 0;
-                const phase = (p.phase || '').replace(/_/g, ' ');
-                btn.innerHTML = `⏳ ${phase} ${pct}%`;
-              } else {
-                // Scan finished
-                const meta = status.lastMeta;
-                const patternsFound = meta ? meta.patternsFound : 0;
-                btn.innerHTML = `✅ ${patternsFound} patterns!`;
-                setTimeout(() => {
-                  btn.innerHTML = origText;
-                  btn.disabled = false;
-                  btn.style.opacity = '1';
-                }, 3000);
-                // Refresh pattern watchlists
-                WatchlistManager.loadPatternWatchlists();
-                if (patternsFound > 0 && confirm(`Scan complete! ${patternsFound} patterns found in ${meta.stocksScanned} stocks. Open dashboard?`)) {
-                  window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
-                }
-                return;
-              }
-            } catch(e) { /* keep polling */ }
+    // Toggle dropdown on click
+    scanBtn.addEventListener('click', (e) => {
+      if (scanBtn.disabled) return;
+      e.stopPropagation();
+      scanDropdown.style.display = scanDropdown.style.display === 'none' ? 'block' : 'none';
+    });
+    // Close dropdown on outside click
+    document.addEventListener('click', () => { scanDropdown.style.display = 'none'; });
+
+    // Hover styles for dropdown items
+    document.querySelectorAll('.scan-tf-opt').forEach(opt => {
+      opt.addEventListener('mouseenter', () => { opt.style.background = '#2a2e3e'; });
+      opt.addEventListener('mouseleave', () => { opt.style.background = 'none'; });
+    });
+
+    // Handle scan timeframe selection
+    document.querySelectorAll('.scan-tf-opt').forEach(opt => {
+      opt.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const tf = opt.getAttribute('data-scan-tf');
+        scanDropdown.style.display = 'none';
+
+        const origText = scanBtn.innerHTML;
+        scanBtn.disabled = true;
+        scanBtn.style.opacity = '0.6';
+
+        const tfLabel = tf === 'all' ? 'All' : tf === 'hourly' ? '1H' : tf.charAt(0).toUpperCase() + tf.slice(1);
+
+        try {
+          const body = tf === 'all' ? {} : { timeframe: tf };
+          const resp = await fetch(`${scannerBase}/api/scanner/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            if (resp.status === 409) {
+              scanBtn.innerHTML = '⏳ Already running...';
+            } else {
+              throw new Error(errData.error || `Scan failed: ${resp.status}`);
+            }
           }
-          // Timed out
-          btn.innerHTML = '⏰ Still running...';
-          setTimeout(() => { btn.innerHTML = origText; btn.disabled = false; btn.style.opacity = '1'; }, 3000);
-        };
-        await pollStatus();
-      } catch(e) {
-        btn.innerHTML = '❌ Failed';
-        console.error('Scan error:', e);
-        setTimeout(() => {
-          btn.innerHTML = origText;
-          btn.disabled = false;
-          btn.style.opacity = '1';
-        }, 3000);
-      }
+
+          // Poll for progress
+          scanBtn.innerHTML = `⏳ ${tfLabel} 0%...`;
+          let attempts = 0;
+          const maxAttempts = 600;
+          const pollStatus = async () => {
+            while (attempts < maxAttempts) {
+              attempts++;
+              await new Promise(r => setTimeout(r, 2000));
+              try {
+                const statusResp = await fetch(`${scannerBase}/api/scanner/status`);
+                const status = await statusResp.json();
+                if (status.running) {
+                  const p = status.progress || {};
+                  const pct = p.total > 0 ? Math.round(p.scanned / p.total * 100) : 0;
+                  const phase = (p.phase || '').replace('fetching_hourly', '1H').replace('fetching_daily', 'Daily').replace('fetching_weekly', 'Weekly').replace('analyzing', 'Analyzing').replace('generating', 'Saving');
+                  scanBtn.innerHTML = `⏳ ${phase} ${pct}%`;
+                } else {
+                  const meta = status.lastMeta;
+                  const patternsFound = meta ? meta.patternsFound : 0;
+                  scanBtn.innerHTML = `✅ ${patternsFound} patterns!`;
+                  setTimeout(() => {
+                    scanBtn.innerHTML = origText;
+                    scanBtn.disabled = false;
+                    scanBtn.style.opacity = '1';
+                  }, 3000);
+                  WatchlistManager.loadPatternWatchlists();
+                  if (patternsFound > 0 && confirm(`${tfLabel} scan complete! ${patternsFound} patterns found in ${meta.stocksScanned} stocks. Open dashboard?`)) {
+                    window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
+                  }
+                  return;
+                }
+              } catch(e) { /* keep polling */ }
+            }
+            scanBtn.innerHTML = '⏰ Still running...';
+            setTimeout(() => { scanBtn.innerHTML = origText; scanBtn.disabled = false; scanBtn.style.opacity = '1'; }, 3000);
+          };
+          await pollStatus();
+        } catch(e) {
+          scanBtn.innerHTML = '❌ Failed';
+          console.error('Scan error:', e);
+          setTimeout(() => {
+            scanBtn.innerHTML = origText;
+            scanBtn.disabled = false;
+            scanBtn.style.opacity = '1';
+          }, 3000);
+        }
+      });
     });
 
     // Timeframe buttons

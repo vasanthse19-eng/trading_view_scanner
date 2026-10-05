@@ -127,15 +127,36 @@ router.get('/dashboard', (req, res) => {
   if (fs.existsSync(dashPath)) {
     res.sendFile(dashPath);
   } else {
-    res.status(404).send(`
-      <html><body style="background:#0a0e17;color:#d1d4dc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
-        <div style="text-align:center;">
-          <h1>📊 No Scan Results Yet</h1>
-          <p>Trigger a scan via the dashboard buttons or POST /api/scanner/run</p>
-          <p style="color:#787b86;">The scanner runs automatically daily at 7:00 PM IST</p>
-        </div>
-      </body></html>
-    `);
+    // Generate a live dashboard with empty results so buttons/history are available
+    const { generateDashboard } = require('./dashboard');
+    const emptyMeta = {
+      scanTime: null,
+      duration: 0,
+      totalStocks: 0,
+      stocksScanned: 0,
+      stocksFailed: 0,
+      patternsFound: 0,
+      timeframesScanned: [],
+      markets: { nse: 0, us: 0, crypto: 0, commodities: 0 },
+      timeframes: [],
+    };
+    try {
+      const html = generateDashboard([], emptyMeta);
+      // Save it so next request serves the file directly
+      fs.writeFileSync(dashPath, html, 'utf8');
+      res.send(html);
+    } catch (e) {
+      console.error('Failed to generate empty dashboard:', e.message);
+      res.status(500).send(`
+        <html><body style="background:#0a0e17;color:#d1d4dc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+          <div style="text-align:center;">
+            <h1>📊 Dashboard Error</h1>
+            <p>Could not generate dashboard: ${e.message}</p>
+            <p style="color:#787b86;">Try triggering a scan via POST /api/scanner/run</p>
+          </div>
+        </body></html>
+      `);
+    }
   }
 });
 

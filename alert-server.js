@@ -505,6 +505,16 @@ try {
       fs.writeFileSync(scanner.DASHBOARD_FILE, html, 'utf8');
       console.log('📄 Dashboard regenerated from existing results on startup');
     }
+  } else {
+    // No results yet — generate empty dashboard so scan buttons are available
+    const emptyMeta = {
+      scanTime: null, duration: 0, totalStocks: 0, stocksScanned: 0,
+      stocksFailed: 0, patternsFound: 0, timeframesScanned: [],
+      markets: { nse: 0, us: 0, crypto: 0, commodities: 0 }, timeframes: [],
+    };
+    const html = generateDashboard([], emptyMeta);
+    fs.writeFileSync(scanner.DASHBOARD_FILE, html, 'utf8');
+    console.log('📄 Empty dashboard generated on startup (no previous results)');
   }
 } catch (e) {
   console.log('⚠️ Could not regenerate dashboard on startup:', e.message);

@@ -57,7 +57,9 @@ function formatPctChange(pct) {
 }
 
 function formatScanTime(isoString) {
+  if (!isoString) return 'No scans yet';
   const d = new Date(isoString);
+  if (isNaN(d.getTime())) return 'No scans yet';
   const options = {
     day: 'numeric', month: 'short', year: 'numeric',
     hour: 'numeric', minute: '2-digit',
