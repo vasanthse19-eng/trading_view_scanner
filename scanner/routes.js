@@ -8,7 +8,7 @@ const scanner = require('./index');
 
 const router = express.Router();
 
-// ── POST /api/scanner/run — Trigger scan (optionally per-timeframe) ──
+// ── POST /api/scanner/run — Trigger scan (optionally per-timeframe + batch) ──
 router.post('/run', async (req, res) => {
   const state = scanner.getState();
   if (state.running) {
@@ -18,7 +18,7 @@ router.post('/run', async (req, res) => {
     });
   }
 
-  const { batchSize, skipTelegram, timeframe } = req.body || {};
+  const { batchSize, skipTelegram, timeframe, batch } = req.body || {};
 
   // Normalize timeframe input: string → array, validate
   let timeframes = null; // null = all
@@ -32,27 +32,36 @@ router.post('/run', async (req, res) => {
     }
   }
 
+  // Validate batch: 1-4 or null
+  let batchNum = null;
+  if (batch != null) {
+    batchNum = parseInt(batch);
+    if (isNaN(batchNum) || batchNum < 1 || batchNum > scanner.TOTAL_BATCHES) batchNum = null;
+  }
+
   const scanPromise = scanner.runScan({
     sendTelegram: req.app.locals.sendTelegram || null,
     dashboardUrl: req.app.locals.dashboardUrl || '',
     batchSize: batchSize || 5,
     skipTelegram: skipTelegram || false,
     timeframes,
+    batch: batchNum,
   });
 
   const tfLabel = timeframes ? timeframes.join(', ') : 'all';
+  const batchLabel = batchNum ? ` batch ${batchNum}/${scanner.TOTAL_BATCHES}` : '';
 
   scanPromise
     .then(({ meta }) => {
-      console.log(`✅ Manual scan (${tfLabel}) completed: ${meta.patternsFound} patterns found`);
+      console.log(`✅ Manual scan (${tfLabel}${batchLabel}) completed: ${meta.patternsFound} patterns found`);
     })
     .catch(err => {
-      console.error(`❌ Manual scan (${tfLabel}) failed:`, err.message);
+      console.error(`❌ Manual scan (${tfLabel}${batchLabel}) failed:`, err.message);
     });
 
   res.json({
     success: true,
-    message: `Scan started for ${tfLabel} timeframe(s)`,
+    message: `Scan started for ${tfLabel} timeframe(s)${batchLabel}`,
     progress: scanner.getState().progress
   });
 });

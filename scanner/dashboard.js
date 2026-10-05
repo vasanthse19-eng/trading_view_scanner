@@ -522,10 +522,17 @@ td.sparkline-cell svg { display: block; }
   </div>
   <div class="nav-actions">
     <button type="button" class="scan-btn secondary" id="refreshBtn">Refresh</button>
+    <select class="sort-select" id="batchSelect" style="margin-right:4px;padding:6px 8px;" title="Split NSE symbols into 4 batches to avoid timeout">
+      <option value="">All Symbols</option>
+      <option value="1">Batch 1</option>
+      <option value="2">Batch 2</option>
+      <option value="3">Batch 3</option>
+      <option value="4">Batch 4</option>
+    </select>
     <button type="button" class="scan-btn" data-timeframe="hourly">Scan 1H</button>
     <button type="button" class="scan-btn" data-timeframe="daily">Scan Daily</button>
     <button type="button" class="scan-btn" data-timeframe="weekly">Scan Weekly</button>
-    <button type="button" class="scan-btn" data-timeframe="all" style="background:#1e53e5">Scan All</button>
+    <button type="button" class="scan-btn" data-timeframe="all" style="background:#1e53e5">Scan All TF</button>
   </div>
 </div>
 
@@ -982,7 +989,8 @@ td.sparkline-cell svg { display: block; }
           error: 'Scan error'
         };
         var label = phaseLabels[prog.phase] || prog.phase || 'Scanning...';
-        var msg = label + (prog.currentSymbol ? ' (' + prog.currentSymbol + ')' : '') +
+        var batchInfo = prog.batch ? ' [B' + prog.batch + '/' + (prog.batchTotal || 4) + ']' : '';
+        var msg = label + batchInfo + (prog.currentSymbol ? ' (' + prog.currentSymbol + ')' : '') +
           (total > 0 ? ' \\u2014 ' + scanned + '/' + total : '');
         setScanProgress(pct, msg);
 
@@ -1009,15 +1017,21 @@ td.sparkline-cell svg { display: block; }
   document.querySelectorAll('[data-timeframe]').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var tf = this.getAttribute('data-timeframe');
+      var batchSelect = document.getElementById('batchSelect');
+      var batch = batchSelect ? batchSelect.value : '';
       disableScanButtons();
 
+      var batchLabel = batch ? ' (Batch ' + batch + ')' : '';
       var progress = document.getElementById('scanProgress');
       progress.classList.remove('hidden');
-      setScanProgress(0, 'Starting ' + (tf === 'all' ? 'full' : tf) + ' scan...');
+      setScanProgress(0, 'Starting ' + (tf === 'all' ? 'full' : tf) + batchLabel + ' scan...');
 
       var body = {};
       if (tf !== 'all') {
         body.timeframe = tf;
+      }
+      if (batch) {
+        body.batch = parseInt(batch);
       }
 
       fetch('/api/scanner/run', {
@@ -1085,6 +1099,7 @@ td.sparkline-cell svg { display: block; }
           var tfLabel = (h.timeframes || []).map(function(t) {
             return t === 'hourly' ? '1H' : t.charAt(0).toUpperCase() + t.slice(1);
           }).join(', ') || 'All';
+          var batchTag = h.batch ? ' B' + h.batch : '';
           var durMin = Math.floor((h.duration || 0) / 60);
           var durSec = (h.duration || 0) % 60;
           var statusDot = h.status === 'success' ? '#26a69a' : '#ef5350';
@@ -1092,7 +1107,7 @@ td.sparkline-cell svg { display: block; }
           html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #1e2235;font-size:0.85rem;">';
           html += '<div style="width:8px;height:8px;border-radius:50%;background:' + statusDot + ';flex-shrink:0;"></div>';
           html += '<div style="color:#787b86;min-width:130px;">' + timeStr + '</div>';
-          html += '<div style="color:#2962ff;font-weight:600;min-width:80px;">' + escapeHtml(tfLabel) + '</div>';
+          html += '<div style="color:#2962ff;font-weight:600;min-width:80px;">' + escapeHtml(tfLabel + batchTag) + '</div>';
           html += '<div style="color:#d1d4dc;">' + (h.patternsFound || 0) + ' patterns / ' + (h.symbolsScanned || 0) + ' symbols' + escapeHtml(errText) + '</div>';
           html += '<div style="color:#787b86;margin-left:auto;white-space:nowrap;">' + durMin + 'm ' + durSec + 's</div>';
           html += '</div>';

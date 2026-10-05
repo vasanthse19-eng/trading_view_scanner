@@ -579,12 +579,21 @@ app.listen(PORT, async () => {
     setTimeout(async () => {
       console.log('⏰ Scheduled daily pattern scan triggered!');
       try {
-        await scanner.runScan({
-          sendTelegram,
-          dashboardUrl: app.locals.dashboardUrl,
-          batchSize: 5,
-          timeframes: ['daily', 'weekly']  // Skip hourly to avoid Yahoo rate limits
-        });
+        // Run in 4 sequential batches to avoid Render timeout
+        for (let batch = 1; batch <= scanner.TOTAL_BATCHES; batch++) {
+          console.log(`📦 Running scheduled scan batch ${batch}/${scanner.TOTAL_BATCHES}...`);
+          await scanner.runScan({
+            sendTelegram: batch === scanner.TOTAL_BATCHES ? sendTelegram : null, // Notify only on last batch
+            dashboardUrl: app.locals.dashboardUrl,
+            batchSize: 5,
+            timeframes: ['daily', 'weekly'],  // Skip hourly to avoid Yahoo rate limits
+            batch,
+          });
+          if (batch < scanner.TOTAL_BATCHES) {
+            await new Promise(r => setTimeout(r, 5000)); // 5s pause between batches
+          }
+        }
+        console.log('✅ All scheduled scan batches complete');
       } catch (e) {
         console.error('❌ Scheduled scan error:', e.message);
       }

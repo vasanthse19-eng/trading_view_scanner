@@ -489,11 +489,21 @@
       <div class="toolbar-section">
         <div style="position:relative;display:inline-block;" id="scan-dropdown-wrap">
           <button class="icon-btn" id="btn-run-scan" title="Run Pattern Scan" style="font-size:14px;color:var(--accent-green,#26a69a);">▶ Scan ▾</button>
-          <div id="scan-dropdown" style="display:none;position:absolute;top:100%;right:0;z-index:999;background:#1e222d;border:1px solid #363a45;border-radius:6px;padding:4px 0;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,0.4);">
+          <div id="scan-dropdown" style="display:none;position:absolute;top:100%;right:0;z-index:999;background:#1e222d;border:1px solid #363a45;border-radius:6px;padding:4px 0;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.4);">
+            <div style="padding:4px 14px;font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:0.5px;">Timeframe</div>
             <button class="scan-tf-opt" data-scan-tf="hourly" style="display:block;width:100%;text-align:left;background:none;border:none;color:#d1d4dc;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">⏱ Scan 1H</button>
             <button class="scan-tf-opt" data-scan-tf="daily" style="display:block;width:100%;text-align:left;background:none;border:none;color:#d1d4dc;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">📅 Scan Daily</button>
             <button class="scan-tf-opt" data-scan-tf="weekly" style="display:block;width:100%;text-align:left;background:none;border:none;color:#d1d4dc;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">📆 Scan Weekly</button>
             <div style="border-top:1px solid #363a45;margin:4px 0;"></div>
+            <div style="padding:4px 14px;font-size:10px;color:#787b86;text-transform:uppercase;letter-spacing:0.5px;">Batch (NSE split)</div>
+            <div style="display:flex;gap:3px;padding:4px 14px 8px;" id="scan-batch-btns">
+              <button class="scan-batch-opt active" data-batch="" style="flex:1;padding:4px 0;font-size:11px;border-radius:3px;border:1px solid #363a45;background:#2a2e3e;color:#d1d4dc;cursor:pointer;font-family:inherit;">All</button>
+              <button class="scan-batch-opt" data-batch="1" style="flex:1;padding:4px 0;font-size:11px;border-radius:3px;border:1px solid #363a45;background:none;color:#787b86;cursor:pointer;font-family:inherit;">B1</button>
+              <button class="scan-batch-opt" data-batch="2" style="flex:1;padding:4px 0;font-size:11px;border-radius:3px;border:1px solid #363a45;background:none;color:#787b86;cursor:pointer;font-family:inherit;">B2</button>
+              <button class="scan-batch-opt" data-batch="3" style="flex:1;padding:4px 0;font-size:11px;border-radius:3px;border:1px solid #363a45;background:none;color:#787b86;cursor:pointer;font-family:inherit;">B3</button>
+              <button class="scan-batch-opt" data-batch="4" style="flex:1;padding:4px 0;font-size:11px;border-radius:3px;border:1px solid #363a45;background:none;color:#787b86;cursor:pointer;font-family:inherit;">B4</button>
+            </div>
+            <div style="border-top:1px solid #363a45;margin:0 0 4px;"></div>
             <button class="scan-tf-opt" data-scan-tf="all" style="display:block;width:100%;text-align:left;background:none;border:none;color:#26a69a;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600;font-family:inherit;">🔍 Scan All</button>
           </div>
         </div>
@@ -2793,9 +2803,10 @@ const UIController = {
     const scannerLink = document.getElementById('scanner-link');
     if (scannerLink) scannerLink.href = `${scannerBase}/api/scanner/dashboard`;
 
-    // Run Scan dropdown + per-timeframe buttons
+    // Run Scan dropdown + per-timeframe + batch buttons
     const scanBtn = document.getElementById('btn-run-scan');
     const scanDropdown = document.getElementById('scan-dropdown');
+    let selectedScanBatch = '';
 
     // Toggle dropdown on click
     scanBtn.addEventListener('click', (e) => {
@@ -2812,6 +2823,22 @@ const UIController = {
       opt.addEventListener('mouseleave', () => { opt.style.background = 'none'; });
     });
 
+    // Batch toggle buttons
+    document.querySelectorAll('.scan-batch-opt').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.scan-batch-opt').forEach(b => {
+          b.style.background = 'none';
+          b.style.color = '#787b86';
+          b.classList.remove('active');
+        });
+        btn.style.background = '#2a2e3e';
+        btn.style.color = '#d1d4dc';
+        btn.classList.add('active');
+        selectedScanBatch = btn.getAttribute('data-batch');
+      });
+    });
+
     // Handle scan timeframe selection
     document.querySelectorAll('.scan-tf-opt').forEach(opt => {
       opt.addEventListener('click', async (e) => {
@@ -2824,9 +2851,11 @@ const UIController = {
         scanBtn.style.opacity = '0.6';
 
         const tfLabel = tf === 'all' ? 'All' : tf === 'hourly' ? '1H' : tf.charAt(0).toUpperCase() + tf.slice(1);
+        const batchSuffix = selectedScanBatch ? ` B${selectedScanBatch}` : '';
 
         try {
           const body = tf === 'all' ? {} : { timeframe: tf };
+          if (selectedScanBatch) body.batch = parseInt(selectedScanBatch);
           const resp = await fetch(`${scannerBase}/api/scanner/run`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2842,7 +2871,7 @@ const UIController = {
           }
 
           // Poll for progress
-          scanBtn.innerHTML = `⏳ ${tfLabel} 0%...`;
+          scanBtn.innerHTML = `⏳ ${tfLabel}${batchSuffix} 0%...`;
           let attempts = 0;
           const maxAttempts = 600;
           const pollStatus = async () => {
@@ -2856,7 +2885,8 @@ const UIController = {
                   const p = status.progress || {};
                   const pct = p.total > 0 ? Math.round(p.scanned / p.total * 100) : 0;
                   const phase = (p.phase || '').replace('fetching_hourly', '1H').replace('fetching_daily', 'Daily').replace('fetching_weekly', 'Weekly').replace('analyzing', 'Analyzing').replace('generating', 'Saving');
-                  scanBtn.innerHTML = `⏳ ${phase} ${pct}%`;
+                  const bInfo = p.batch ? ` B${p.batch}` : '';
+                  scanBtn.innerHTML = `⏳ ${phase}${bInfo} ${pct}%`;
                 } else {
                   const meta = status.lastMeta;
                   const patternsFound = meta ? meta.patternsFound : 0;
@@ -2867,7 +2897,7 @@ const UIController = {
                     scanBtn.style.opacity = '1';
                   }, 3000);
                   WatchlistManager.loadPatternWatchlists();
-                  if (patternsFound > 0 && confirm(`${tfLabel} scan complete! ${patternsFound} patterns found in ${meta.stocksScanned} stocks. Open dashboard?`)) {
+                  if (patternsFound > 0 && confirm(`${tfLabel}${batchSuffix} scan complete! ${patternsFound} patterns found in ${meta.stocksScanned} stocks. Open dashboard?`)) {
                     window.open(`${scannerBase}/api/scanner/dashboard`, '_blank');
                   }
                   return;
