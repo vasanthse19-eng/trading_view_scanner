@@ -12,33 +12,36 @@
  */
 
 const PATTERN_ICONS = {
-  ascending_triangle: '📐⬆️',
-  descending_triangle: '📐⬇️',
+  ascending_triangle:   '📐⬆️',
+  descending_triangle:  '📐⬇️',
   symmetrical_triangle: '📐↔️',
-  bull_flag: '🚩⬆️',
-  bear_flag: '🚩⬇️',
-  head_and_shoulders: '👤⬇️',
-  inverse_head_and_shoulders: '👤⬆️'
+  ascending_channel:    '📈⬆️',
+  descending_channel:   '📉⬇️',
+  rectangle:            '⬜',
+  rising_wedge:         '🔺⬇️',
+  falling_wedge:        '🔻⬆️',
 };
 
 const PATTERN_LABELS = {
-  ascending_triangle: 'Ascending Triangle',
-  descending_triangle: 'Descending Triangle',
+  ascending_triangle:   'Ascending Triangle',
+  descending_triangle:  'Descending Triangle',
   symmetrical_triangle: 'Symmetrical Triangle',
-  bull_flag: 'Bull Flag',
-  bear_flag: 'Bear Flag',
-  head_and_shoulders: 'Head & Shoulders',
-  inverse_head_and_shoulders: 'Inverse H&S'
+  ascending_channel:    'Ascending Channel',
+  descending_channel:   'Descending Channel',
+  rectangle:            'Rectangle (Range)',
+  rising_wedge:         'Rising Wedge',
+  falling_wedge:        'Falling Wedge',
 };
 
 const PATTERN_CATEGORIES = {
-  ascending_triangle: 'triangles',
-  descending_triangle: 'triangles',
+  ascending_triangle:   'triangles',
+  descending_triangle:  'triangles',
   symmetrical_triangle: 'triangles',
-  bull_flag: 'flags',
-  bear_flag: 'flags',
-  head_and_shoulders: 'hs',
-  inverse_head_and_shoulders: 'hs'
+  ascending_channel:    'channels',
+  descending_channel:   'channels',
+  rectangle:            'channels',
+  rising_wedge:         'wedges',
+  falling_wedge:        'wedges',
 };
 
 function formatPrice(price) {
@@ -102,6 +105,7 @@ function buildRowsJSON(scanResults) {
         symbol: stock.symbol,
         name: stock.name || '',
         sector: stock.sector || '',
+        market: stock.market || 'nse',
         price: stock.price,
         dailyChange: stock.dailyChange,
         weeklyChange: stock.weeklyChange,
@@ -116,6 +120,7 @@ function buildRowsJSON(scanResults) {
         targetPrice: pat.targetPrice,
         stopLoss: pat.stopLoss,
         breakoutPrice: pat.breakoutPrice,
+        touches: (pat.details && pat.details.totalTouches) || 0,
         details: pat.details || {}
       });
     }
@@ -124,11 +129,12 @@ function buildRowsJSON(scanResults) {
 }
 
 function countByCategory(rows) {
-  const counts = { triangles: 0, flags: 0, hs: 0, bullish: 0, bearish: 0 };
+  const counts = { triangles: 0, channels: 0, wedges: 0, bullish: 0, bearish: 0, neutral: 0 };
   for (const r of rows) {
     if (counts[r.patternCategory] !== undefined) counts[r.patternCategory]++;
     if (r.direction === 'bullish') counts.bullish++;
-    if (r.direction === 'bearish') counts.bearish++;
+    else if (r.direction === 'bearish') counts.bearish++;
+    else counts.neutral++;
   }
   return counts;
 }
@@ -546,8 +552,8 @@ td.sparkline-cell svg { display: block; }
       <span class="filter-group-label">Type:</span>
       <button class="filter-btn active" data-filter="category" data-value="all">All</button>
       <button class="filter-btn" data-filter="category" data-value="triangles">📐 Triangles</button>
-      <button class="filter-btn" data-filter="category" data-value="flags">🚩 Flags</button>
-      <button class="filter-btn" data-filter="category" data-value="hs">👤 H&amp;S</button>
+      <button class="filter-btn" data-filter="category" data-value="channels">📈 Channels</button>
+      <button class="filter-btn" data-filter="category" data-value="wedges">🔺 Wedges</button>
     </div>
     <div class="filter-sep"></div>
     <div class="filter-group">
@@ -560,6 +566,7 @@ td.sparkline-cell svg { display: block; }
     <div class="filter-group">
       <span class="filter-group-label">Timeframe:</span>
       <button class="filter-btn active" data-filter="timeframe" data-value="all">All</button>
+      <button class="filter-btn" data-filter="timeframe" data-value="hourly">1H</button>
       <button class="filter-btn" data-filter="timeframe" data-value="daily">Daily</button>
       <button class="filter-btn" data-filter="timeframe" data-value="weekly">Weekly</button>
     </div>
@@ -593,22 +600,22 @@ td.sparkline-cell svg { display: block; }
       <div class="card-label">Triangles</div>
     </div>
     <div class="summary-card">
-      <div class="card-icon">🚩</div>
-      <div class="card-count" id="countFlags">${counts.flags}</div>
-      <div class="card-label">Flags</div>
-    </div>
-    <div class="summary-card">
-      <div class="card-icon">👤</div>
-      <div class="card-count" id="countHS">${counts.hs}</div>
-      <div class="card-label">H&amp;S</div>
-    </div>
-    <div class="summary-card">
       <div class="card-icon">📈</div>
+      <div class="card-count" id="countChannels">${counts.channels}</div>
+      <div class="card-label">Channels</div>
+    </div>
+    <div class="summary-card">
+      <div class="card-icon">🔺</div>
+      <div class="card-count" id="countWedges">${counts.wedges}</div>
+      <div class="card-label">Wedges</div>
+    </div>
+    <div class="summary-card">
+      <div class="card-icon">🟢</div>
       <div class="card-count bullish" id="countBullish">${counts.bullish}</div>
       <div class="card-label">Bullish</div>
     </div>
     <div class="summary-card">
-      <div class="card-icon">📉</div>
+      <div class="card-icon">🔴</div>
       <div class="card-count bearish" id="countBearish">${counts.bearish}</div>
       <div class="card-label">Bearish</div>
     </div>
@@ -634,6 +641,7 @@ td.sparkline-cell svg { display: block; }
           <th>Daily Chg</th>
           <th>Weekly Chg</th>
           <th>Pattern</th>
+          <th>Touches</th>
           <th>Confidence</th>
           <th>Sparkline</th>
           <th>Target</th>
@@ -757,15 +765,15 @@ td.sparkline-cell svg { display: block; }
 
   /* ===== UPDATE SUMMARY COUNTS ===== */
   function updateCounts(filtered) {
-    var ct = { triangles: 0, flags: 0, hs: 0, bullish: 0, bearish: 0 };
+    var ct = { triangles: 0, channels: 0, wedges: 0, bullish: 0, bearish: 0 };
     filtered.forEach(function(r) {
       if (ct[r.patternCategory] !== undefined) ct[r.patternCategory]++;
       if (r.direction === 'bullish') ct.bullish++;
-      if (r.direction === 'bearish') ct.bearish++;
+      else if (r.direction === 'bearish') ct.bearish++;
     });
     document.getElementById('countTriangles').textContent = ct.triangles;
-    document.getElementById('countFlags').textContent = ct.flags;
-    document.getElementById('countHS').textContent = ct.hs;
+    document.getElementById('countChannels').textContent = ct.channels;
+    document.getElementById('countWedges').textContent = ct.wedges;
     document.getElementById('countBullish').textContent = ct.bullish;
     document.getElementById('countBearish').textContent = ct.bearish;
     document.getElementById('countTotal').textContent = filtered.length;
@@ -796,11 +804,12 @@ td.sparkline-cell svg { display: block; }
       var cc = confColor(r.confidence);
 
       html += '<tr data-idx="' + i + '" class="result-row">';
-      html += '<td class="symbol-cell" data-label="Stock"><a class="symbol-link" href="/?symbol=' + encodeURIComponent(r.symbol) + '&market=nse" onclick="event.stopPropagation()">' + escapeHtml(r.symbol) + '</a><span class="stock-name">' + escapeHtml(r.name) + '</span></td>';
+      html += '<td class="symbol-cell" data-label="Stock"><a class="symbol-link" href="/?symbol=' + encodeURIComponent(r.symbol) + '&market=' + (r.market || 'nse') + '" onclick="event.stopPropagation()">' + escapeHtml(r.symbol) + '</a><span class="stock-name">' + escapeHtml(r.name) + '</span></td>';
       html += '<td class="price-cell" data-label="Price">' + formatPrice(r.price) + '</td>';
       html += '<td class="change-cell ' + dcClass + '" data-label="Daily Chg">' + formatPct(r.dailyChange) + '</td>';
       html += '<td class="change-cell ' + wcClass + '" data-label="Weekly Chg">' + formatPct(r.weeklyChange) + '</td>';
-      html += '<td class="pattern-cell" data-label="Pattern">' + r.patternIcon + ' ' + escapeHtml(r.patternLabel) + '</td>';
+      html += '<td class="pattern-cell" data-label="Pattern">' + r.patternIcon + ' ' + escapeHtml(r.patternLabel) + '<br><span style="font-size:0.75rem;color:#787b86">' + capitalize(r.timeframe) + '</span></td>';
+      html += '<td data-label="Touches" style="text-align:center;font-weight:600;color:#d1d4dc">' + (r.touches || '-') + '</td>';
       html += '<td data-label="Confidence"><div class="confidence-bar-wrapper">';
       html += '<div class="confidence-bar-bg"><div class="confidence-bar-fill" style="width:' + r.confidence + '%;background:' + cc + '"></div></div>';
       html += '<span class="confidence-value" style="color:' + cc + '">' + r.confidence + '%</span>';
@@ -811,7 +820,7 @@ td.sparkline-cell svg { display: block; }
 
       /* Detail row (hidden by default) */
       html += '<tr class="detail-row" data-detail="' + i + '" style="display:none;">';
-      html += '<td colspan="8"><div class="detail-content">';
+      html += '<td colspan="9"><div class="detail-content">';
       html += '<div class="detail-item"><div class="detail-label">Pattern</div><div class="detail-value">' + r.patternIcon + ' ' + escapeHtml(r.patternLabel) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Direction</div><div class="detail-value" style="color:' + (r.direction === 'bullish' ? '#26a69a' : '#ef5350') + '">' + capitalize(r.direction) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Timeframe</div><div class="detail-value">' + capitalize(r.timeframe) + '</div></div>';

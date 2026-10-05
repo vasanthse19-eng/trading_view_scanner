@@ -1,9 +1,13 @@
 // ==================== SCANNER ORCHESTRATOR ====================
 // Coordinates data fetching, pattern detection, dashboard generation, and Telegram alerts
+// Scans: NSE + US Stocks + Crypto + Commodities across 1H / 1D / Weekly timeframes
+
+'use strict';
 
 const path = require('path');
 const fs = require('fs');
 const NSE_SYMBOLS = require('./nse-symbols');
+const { US_STOCKS, CRYPTO, COMMODITIES } = require('./scan-symbols');
 const { fetchBatch, extractPriceSummary } = require('./data-fetcher');
 const { scanAllPatterns } = require('./patterns');
 const { generateDashboard } = require('./dashboard');
@@ -21,15 +25,47 @@ let scanState = {
 const DASHBOARD_FILE = path.join(__dirname, '..', 'scanner-dashboard.html');
 const RESULTS_FILE = path.join(__dirname, '..', 'scanner-results.json');
 
+// Timeframes to scan
+const TIMEFRAMES = [
+  { key: 'hourly', label: '1H',     minCandles: 50 },
+  { key: 'daily',  label: 'Daily',  minCandles: 40 },
+  { key: 'weekly', label: 'Weekly', minCandles: 30 },
+];
+
 /**
- * Run the full pattern scan
- * @param {Object} options
- * @param {function} options.sendTelegram - Telegram send function from alert-server
- * @param {string} options.dashboardUrl - Public URL for the dashboard
- * @param {number} options.batchSize - Concurrent fetches (default: 5)
- * @param {Array} options.symbols - Override symbol list (default: all NSE)
- * @param {boolean} options.skipTelegram - Don't send Telegram (for testing)
- * @returns {Promise<{results, meta}>}
+ * Build the full symbol list to scan (NSE + US + Crypto + Commodities).
+ * Tag each with a `market` field so the dashboard can link correctly.
+ */
+function buildSymbolList(options = {}) {
+  const {
+    includeNSE = true,
+    includeUS = true,
+    includeCrypto = true,
+    includeCommodities = true,
+    nseLimit = 0,  // 0 = all
+  } = options;
+
+  const symbols = [];
+
+  if (includeNSE) {
+    const nse = nseLimit > 0 ? NSE_SYMBOLS.slice(0, nseLimit) : NSE_SYMBOLS;
+    nse.forEach(s => symbols.push({ ...s, market: 'nse' }));
+  }
+  if (includeUS) {
+    US_STOCKS.forEach(s => symbols.push({ ...s, market: 'us' }));
+  }
+  if (includeCrypto) {
+    CRYPTO.forEach(s => symbols.push({ ...s, market: 'crypto' }));
+  }
+  if (includeCommodities) {
+    COMMODITIES.forEach(s => symbols.push({ ...s, market: 'commodities' }));
+  }
+
+  return symbols;
+}
+
+/**
+ * Run the full pattern scan across all markets and timeframes.
  */
 async function runScan(options = {}) {
   if (scanState.running) {
@@ -40,16 +76,27 @@ async function runScan(options = {}) {
     sendTelegram = null,
     dashboardUrl = '',
     batchSize = 5,
-    symbols = NSE_SYMBOLS,
-    skipTelegram = false
+    symbols: overrideSymbols = null,
+    skipTelegram = false,
+    includeNSE = true,
+    includeUS = true,
+    includeCrypto = true,
+    includeCommodities = true,
+    nseLimit = 0,
   } = options;
+
+  const symbols = overrideSymbols || buildSymbolList({
+    includeNSE, includeUS, includeCrypto, includeCommodities, nseLimit
+  });
 
   scanState.running = true;
   scanState.progress = { scanned: 0, total: symbols.length, currentSymbol: '', phase: 'starting' };
 
   const startTime = Date.now();
   console.log(`\n🔍 ═══════════════════════════════════════════════`);
-  console.log(`🔍  Pattern Scanner Starting — ${symbols.length} stocks`);
+  console.log(`🔍  Pattern Scanner Starting — ${symbols.length} symbols`);
+  console.log(`🔍  Markets: NSE(${includeNSE}) US(${includeUS}) Crypto(${includeCrypto}) Commodities(${includeCommodities})`);
+  console.log(`🔍  Timeframes: ${TIMEFRAMES.map(t => t.label).join(', ')}`);
   console.log(`🔍 ═══════════════════════════════════════════════\n`);
 
   const allResults = [];
@@ -57,55 +104,42 @@ async function runScan(options = {}) {
   let stocksFailed = 0;
 
   try {
-    // ── Phase 1: Fetch daily data ──────────────────────────
-    scanState.progress.phase = 'fetching_daily';
-    console.log('📥 Phase 1/4: Fetching daily (6mo) data...');
+    // ── Phase 1-3: Fetch data for each timeframe ──────────
+    const dataByTimeframe = {};
+    let phaseNum = 0;
+    const totalPhases = TIMEFRAMES.length + 1; // +1 for analysis
 
-    const dailyData = await fetchBatch(symbols, 'daily', {
-      batchSize,
-      batchDelay: 500,
-      onProgress: (done, total, sym) => {
-        scanState.progress = { scanned: done, total, currentSymbol: sym, phase: 'fetching_daily' };
-        if (done % 100 === 0 || done === total) {
-          console.log(`   📥 Daily: ${done}/${total} (${(done/total*100).toFixed(0)}%)`);
+    for (const tf of TIMEFRAMES) {
+      phaseNum++;
+      const phaseKey = `fetching_${tf.key}`;
+      scanState.progress.phase = phaseKey;
+      console.log(`📥 Phase ${phaseNum}/${totalPhases}: Fetching ${tf.label} data...`);
+
+      dataByTimeframe[tf.key] = await fetchBatch(symbols, tf.key, {
+        batchSize,
+        batchDelay: 600,
+        onProgress: (done, total, sym) => {
+          scanState.progress = { scanned: done, total, currentSymbol: sym, phase: phaseKey };
+          if (done % 100 === 0 || done === total) {
+            console.log(`   📥 ${tf.label}: ${done}/${total} (${(done / total * 100).toFixed(0)}%)`);
+          }
         }
-      }
-    });
+      });
+    }
 
-    // ── Phase 2: Fetch weekly data ─────────────────────────
-    scanState.progress.phase = 'fetching_weekly';
-    console.log('📥 Phase 2/4: Fetching weekly (1y) data...');
-
-    const weeklyData = await fetchBatch(symbols, 'weekly', {
-      batchSize,
-      batchDelay: 500,
-      onProgress: (done, total, sym) => {
-        scanState.progress = { scanned: done, total, currentSymbol: sym, phase: 'fetching_weekly' };
-        if (done % 100 === 0 || done === total) {
-          console.log(`   📥 Weekly: ${done}/${total} (${(done/total*100).toFixed(0)}%)`);
-        }
-      }
-    });
-
-    // ── Phase 3: Pattern detection ─────────────────────────
+    // ── Analysis phase ───────────────────────────────────
+    phaseNum++;
     scanState.progress.phase = 'analyzing';
-    console.log('🧮 Phase 3/4: Running pattern detection...');
+    console.log(`🧮 Phase ${phaseNum}/${totalPhases}: Running pattern detection...`);
 
     let analyzed = 0;
     for (const stock of symbols) {
-      const daily = dailyData.get(stock.symbol);
-      const weekly = weeklyData.get(stock.symbol);
-
-      if (!daily && !weekly) {
-        stocksFailed++;
-        continue;
-      }
-      stocksScanned++;
-
+      let hasData = false;
       const stockResult = {
         symbol: stock.symbol,
         name: stock.name,
         sector: stock.sector,
+        market: stock.market || 'nse',
         price: 0,
         dailyChange: 0,
         weeklyChange: 0,
@@ -113,28 +147,41 @@ async function runScan(options = {}) {
         patterns: []
       };
 
-      // Extract price info from daily data
-      if (daily) {
-        const summary = extractPriceSummary(daily);
-        stockResult.price = summary.price;
-        stockResult.dailyChange = summary.dailyChange;
-        stockResult.weeklyChange = summary.weeklyChange;
-        stockResult.sparkline = summary.sparkline;
+      for (const tf of TIMEFRAMES) {
+        const tfData = dataByTimeframe[tf.key]?.get(stock.symbol);
+        if (!tfData || tfData.candles.length < tf.minCandles) continue;
 
-        // Scan daily candles for patterns
-        const dailyPatterns = scanAllPatterns(daily.candles);
-        dailyPatterns.forEach(p => { p.timeframe = 'daily'; });
-        stockResult.patterns.push(...dailyPatterns);
+        hasData = true;
+
+        // Extract price info from daily (or hourly if no daily)
+        if (tf.key === 'daily' || (tf.key === 'hourly' && stockResult.price === 0)) {
+          const summary = extractPriceSummary(tfData);
+          stockResult.price = summary.price;
+          stockResult.dailyChange = summary.dailyChange;
+          stockResult.weeklyChange = summary.weeklyChange;
+          stockResult.sparkline = summary.sparkline;
+        }
+
+        // Run pattern scan with timeframe-appropriate window cap
+        const maxWin = tf.key === 'hourly' ? 200 : tf.key === 'daily' ? 500 : 300;
+        const patterns = scanAllPatterns(tfData.candles, {
+          minCandles: tf.minCandles,
+          tolerance: 0.015,     // 1.5% touch tolerance
+          minTouches: 3,
+          lookback: tf.key === 'hourly' ? 4 : 5,
+          maxWindow: maxWin,
+        });
+
+        patterns.forEach(p => { p.timeframe = tf.key; });
+        stockResult.patterns.push(...patterns);
       }
 
-      // Scan weekly candles for patterns
-      if (weekly && weekly.candles.length >= 30) {
-        const weeklyPatterns = scanAllPatterns(weekly.candles);
-        weeklyPatterns.forEach(p => { p.timeframe = 'weekly'; });
-        stockResult.patterns.push(...weeklyPatterns);
+      if (!hasData) {
+        stocksFailed++;
+      } else {
+        stocksScanned++;
       }
 
-      // Only include stocks with patterns
       if (stockResult.patterns.length > 0) {
         allResults.push(stockResult);
       }
@@ -146,7 +193,6 @@ async function runScan(options = {}) {
       }
     }
 
-    // Sort results by highest confidence pattern first
     allResults.sort((a, b) => {
       const aMax = Math.max(...a.patterns.map(p => p.confidence));
       const bMax = Math.max(...b.patterns.map(p => p.confidence));
@@ -161,29 +207,32 @@ async function runScan(options = {}) {
       totalStocks: symbols.length,
       stocksScanned,
       stocksFailed,
-      patternsFound: allResults.reduce((sum, r) => sum + r.patterns.length, 0)
+      patternsFound: allResults.reduce((sum, r) => sum + r.patterns.length, 0),
+      markets: {
+        nse: includeNSE ? NSE_SYMBOLS.length : 0,
+        us: includeUS ? US_STOCKS.length : 0,
+        crypto: includeCrypto ? CRYPTO.length : 0,
+        commodities: includeCommodities ? COMMODITIES.length : 0,
+      },
+      timeframes: TIMEFRAMES.map(t => t.label),
     };
 
-    // ── Phase 4: Generate outputs ──────────────────────────
+    // ── Generate outputs ─────────────────────────────────
     scanState.progress.phase = 'generating';
-    console.log('📄 Phase 4/4: Generating dashboard & alerts...');
+    console.log('📄 Generating dashboard & alerts...');
 
-    // Generate HTML dashboard
     const dashboardHtml = generateDashboard(allResults, scanMeta);
     fs.writeFileSync(DASHBOARD_FILE, dashboardHtml, 'utf8');
     console.log(`   📄 Dashboard saved to ${DASHBOARD_FILE}`);
 
-    // Save results JSON (for API access)
     fs.writeFileSync(RESULTS_FILE, JSON.stringify({ results: allResults, meta: scanMeta }, null, 2), 'utf8');
 
-    // Send Telegram summary
     if (sendTelegram && !skipTelegram) {
       const telegramMsg = buildTelegramMessage(allResults, scanMeta, dashboardUrl);
       await sendTelegram(telegramMsg);
       console.log('   📨 Telegram summary sent');
     }
 
-    // Update state
     scanState.lastScan = scanMeta.scanTime;
     scanState.lastResults = allResults;
     scanState.lastMeta = scanMeta;
@@ -191,7 +240,7 @@ async function runScan(options = {}) {
 
     console.log(`\n✅ ═══════════════════════════════════════════════`);
     console.log(`✅  Scan complete in ${duration}s`);
-    console.log(`✅  ${stocksScanned} stocks analyzed, ${scanMeta.patternsFound} patterns found`);
+    console.log(`✅  ${stocksScanned} symbols analyzed, ${scanMeta.patternsFound} patterns found`);
     console.log(`✅ ═══════════════════════════════════════════════\n`);
 
     return { results: allResults, meta: scanMeta };
@@ -212,12 +261,13 @@ function buildTelegramMessage(results, meta, dashboardUrl) {
   const lines = [
     `📊 <b>Pattern Scanner Report</b>`,
     `🕐 ${new Date(meta.scanTime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`,
-    `📈 ${meta.stocksScanned} stocks scanned in ${meta.duration}s`,
+    `📈 ${meta.stocksScanned} symbols scanned in ${meta.duration}s`,
+    `🌐 NSE: ${meta.markets.nse} | US: ${meta.markets.us} | Crypto: ${meta.markets.crypto} | Commodities: ${meta.markets.commodities}`,
+    `⏱️ Timeframes: ${meta.timeframes.join(', ')}`,
     `🔍 <b>${meta.patternsFound} patterns found</b>`,
     ``
   ];
 
-  // Count by pattern type
   const counts = {};
   results.forEach(r => r.patterns.forEach(p => {
     const key = p.pattern.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -228,20 +278,20 @@ function buildTelegramMessage(results, meta, dashboardUrl) {
   });
   lines.push('');
 
-  // Top 10 matches
   const top = results.slice(0, 10);
   if (top.length > 0) {
     lines.push(`🏆 <b>Top ${top.length} Matches:</b>`);
     lines.push('');
     top.forEach((r, i) => {
-      const sym = r.symbol.replace('.NS', '');
+      const sym = r.symbol.replace('.NS', '').replace('-USD', '');
       const topPattern = r.patterns[0];
       const icon = getPatternIcon(topPattern.pattern);
-      const dir = topPattern.direction === 'bullish' ? '🟢' : '🔴';
+      const dir = topPattern.direction === 'bullish' ? '🟢' : topPattern.direction === 'bearish' ? '🔴' : '🟡';
+      const currency = r.market === 'nse' ? '₹' : '$';
       lines.push(
-        `${i + 1}. ${dir} <b>${sym}</b> — ₹${r.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-        `   ${icon} ${formatPatternName(topPattern.pattern)} (${topPattern.confidence}% conf)`,
-        `   Target: ₹${topPattern.targetPrice?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) || 'N/A'} | SL: ₹${topPattern.stopLoss?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) || 'N/A'}`,
+        `${i + 1}. ${dir} <b>${sym}</b> — ${currency}${r.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+        `   ${icon} ${formatPatternName(topPattern.pattern)} [${topPattern.timeframe}] (${topPattern.confidence}% conf)`,
+        `   Target: ${currency}${topPattern.targetPrice?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) || 'N/A'} | SL: ${currency}${topPattern.stopLoss?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) || 'N/A'}`,
         ``
       );
     });
@@ -251,19 +301,20 @@ function buildTelegramMessage(results, meta, dashboardUrl) {
     lines.push(`🔗 <a href="${dashboardUrl}/scanner-dashboard.html">View Full Dashboard</a>`);
   }
 
-  lines.push(`\n⚡ <i>TradeView Pro Scanner</i>`);
+  lines.push(`\n⚡ <i>TradeView Pro Scanner v2</i>`);
   return lines.join('\n');
 }
 
 function getPatternIcon(pattern) {
   const icons = {
-    ascending_triangle: '📐⬆️',
-    descending_triangle: '📐⬇️',
+    ascending_triangle:   '📐⬆️',
+    descending_triangle:  '📐⬇️',
     symmetrical_triangle: '📐↔️',
-    bull_flag: '🚩⬆️',
-    bear_flag: '🚩⬇️',
-    head_and_shoulders: '👤⬇️',
-    inverse_head_and_shoulders: '👤⬆️'
+    ascending_channel:    '📈⬆️',
+    descending_channel:   '📉⬇️',
+    rectangle:            '⬜',
+    rising_wedge:         '🔺⬇️',
+    falling_wedge:        '🔻⬆️',
   };
   return icons[pattern] || '📊';
 }
@@ -282,6 +333,7 @@ function getState() {
 module.exports = {
   runScan,
   getState,
+  buildSymbolList,
   DASHBOARD_FILE,
   RESULTS_FILE
 };

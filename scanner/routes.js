@@ -122,12 +122,15 @@ router.get('/dashboard', (req, res) => {
   }
 });
 
-// ── GET /api/scanner/symbols — List all NSE symbols ──────
+// ── GET /api/scanner/symbols — List all scan symbols (multi-market) ──────
 router.get('/symbols', (req, res) => {
-  const NSE_SYMBOLS = require('./nse-symbols');
-  const { sector, search, limit } = req.query;
-  let symbols = [...NSE_SYMBOLS];
+  const { buildSymbolList } = require('./index');
+  const { sector, search, limit, market } = req.query;
+  let symbols = buildSymbolList();
 
+  if (market) {
+    symbols = symbols.filter(s => s.market === market);
+  }
   if (sector) {
     symbols = symbols.filter(s => s.sector.toLowerCase() === sector.toLowerCase());
   }
@@ -142,7 +145,7 @@ router.get('/symbols', (req, res) => {
   if (limit) symbols = symbols.slice(0, parseInt(limit));
 
   // Get unique sectors for filter
-  const sectors = [...new Set(NSE_SYMBOLS.map(s => s.sector))].sort();
+  const sectors = [...new Set(symbols.map(s => s.sector))].sort();
 
   res.json({ symbols, total, sectors });
 });

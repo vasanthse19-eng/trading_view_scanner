@@ -2,20 +2,20 @@
 // Fetches OHLCV data from Yahoo Finance in batches
 // Handles rate limiting, retries, and error recovery
 
+'use strict';
+
 const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-// Timeframe configs for scanner
+// Timeframe configs for scanner — extended for pattern detection
 const SCAN_CONFIGS = {
-  daily: { range: '6mo', interval: '1d' },
-  weekly: { range: '1y', interval: '1wk' }
+  hourly:  { range: '2y',  interval: '60m' },   // 1H: ~120 trading-day candles
+  daily:   { range: '2y',  interval: '1d' },     // 1D: ~500 candles (covers >2yr patterns)
+  weekly:  { range: '5y',  interval: '1wk' },    // 1W: ~260 candles
 };
 
 /**
  * Fetch OHLCV candles for a single symbol from Yahoo Finance
- * @param {string} symbol - Yahoo Finance symbol (e.g. 'RELIANCE.NS')
- * @param {'daily'|'weekly'} timeframe
- * @returns {Promise<{candles: Array, meta: Object}|null>}
  */
 async function fetchOHLCV(symbol, timeframe = 'daily') {
   const config = SCAN_CONFIGS[timeframe] || SCAN_CONFIGS.daily;
@@ -24,7 +24,7 @@ async function fetchOHLCV(symbol, timeframe = 'daily') {
   try {
     const resp = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(15000) // 15s timeout
+      signal: AbortSignal.timeout(15000)
     });
 
     if (!resp.ok) {
@@ -54,6 +54,50 @@ async function fetchOHLCV(symbol, timeframe = 'daily') {
       }
     }
 
+    // For BSE stocks (.BO suffix), retry with smaller range if too few candles
+    if (candles.length < 5 && (symbol.endsWith('.BO') || symbol.endsWith('.NS'))) {
+      const fallbackRanges = ['5y', '2y', '1y', '6mo', '3mo'];
+      for (const fbRange of fallbackRanges) {
+        if (fbRange === config.range) continue;
+        try {
+          const fbUrl = `${YAHOO_BASE}/${encodeURIComponent(symbol)}?range=${fbRange}&interval=${config.interval}`;
+          const fbResp = await fetch(fbUrl, {
+            headers: { 'User-Agent': USER_AGENT },
+            signal: AbortSignal.timeout(15000)
+          });
+          if (!fbResp.ok) continue;
+          const fbData = await fbResp.json();
+          const fbResult = fbData.chart?.result?.[0];
+          if (!fbResult || !fbResult.timestamp) continue;
+          const fbQ = fbResult.indicators?.quote?.[0];
+          if (!fbQ) continue;
+          const fbCandles = [];
+          for (let i = 0; i < fbResult.timestamp.length; i++) {
+            if (fbQ.open?.[i] != null && fbQ.close?.[i] != null) {
+              fbCandles.push({
+                time: fbResult.timestamp[i],
+                open: fbQ.open[i], high: fbQ.high[i],
+                low: fbQ.low[i], close: fbQ.close[i],
+                volume: fbQ.volume?.[i] || 0
+              });
+            }
+          }
+          if (fbCandles.length >= 5) {
+            const fbMeta = fbResult.meta || {};
+            return {
+              candles: fbCandles,
+              meta: {
+                symbol: fbMeta.symbol, currency: fbMeta.currency,
+                regularMarketPrice: fbMeta.regularMarketPrice,
+                previousClose: fbMeta.previousClose || fbMeta.chartPreviousClose,
+                exchangeName: fbMeta.exchangeName
+              }
+            };
+          }
+        } catch (_) { /* try next */ }
+      }
+    }
+
     const meta = result.meta || {};
     return {
       candles,
@@ -66,21 +110,13 @@ async function fetchOHLCV(symbol, timeframe = 'daily') {
       }
     };
   } catch (e) {
-    if (e.message === 'RATE_LIMITED') throw e; // Let caller handle rate limit
+    if (e.message === 'RATE_LIMITED') throw e;
     return null;
   }
 }
 
 /**
  * Fetch OHLCV data for multiple symbols in batches
- * @param {Array<{symbol: string, name: string, sector: string}>} symbols
- * @param {'daily'|'weekly'} timeframe
- * @param {Object} options
- * @param {number} options.batchSize - How many to fetch concurrently (default: 5)
- * @param {number} options.batchDelay - ms delay between batches (default: 500)
- * @param {number} options.retries - Retry count on rate limit (default: 2)
- * @param {function} options.onProgress - Progress callback (scanned, total, symbol)
- * @returns {Promise<Map<string, {candles, meta}>>}
  */
 async function fetchBatch(symbols, timeframe = 'daily', options = {}) {
   const {
@@ -115,7 +151,6 @@ async function fetchBatch(symbols, timeframe = 'daily', options = {}) {
           lastErr = e;
           if (e.message === 'RATE_LIMITED') {
             rateLimitHits++;
-            // Exponential backoff on rate limit
             const backoff = Math.min(2000 * Math.pow(2, attempt), 30000);
             console.log(`⏳ Rate limited on ${stock.symbol}, waiting ${backoff}ms (attempt ${attempt + 1})`);
             await sleep(backoff);
@@ -123,7 +158,6 @@ async function fetchBatch(symbols, timeframe = 'daily', options = {}) {
         }
       }
       failed++;
-      // Silent fail after retries exhausted
     });
 
     await Promise.all(promises);
@@ -133,14 +167,12 @@ async function fetchBatch(symbols, timeframe = 'daily', options = {}) {
       onProgress(scanned, symbols.length, batch[batch.length - 1]?.symbol || '');
     }
 
-    // Adaptive delay: increase if hitting rate limits
     let delay = batchDelay;
     if (rateLimitHits > 0) {
       delay = Math.min(batchDelay * (1 + rateLimitHits), 5000);
-      rateLimitHits = 0; // Reset after adapting
+      rateLimitHits = 0;
     }
 
-    // Delay between batches (skip after last batch)
     if (i + batchSize < symbols.length) {
       await sleep(delay);
     }
@@ -152,8 +184,6 @@ async function fetchBatch(symbols, timeframe = 'daily', options = {}) {
 
 /**
  * Extract price summary from fetched data
- * @param {Object} data - Result from fetchOHLCV
- * @returns {{price, dailyChange, weeklyChange, sparkline}}
  */
 function extractPriceSummary(data) {
   if (!data || !data.candles || data.candles.length === 0) {
@@ -167,12 +197,10 @@ function extractPriceSummary(data) {
 
   const dailyChange = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
 
-  // Weekly change: compare current price to price ~5 trading days ago
   const weekAgoIdx = Math.max(0, candles.length - 6);
   const weekAgoPrice = candles[weekAgoIdx].close;
   const weeklyChange = weekAgoPrice > 0 ? ((price - weekAgoPrice) / weekAgoPrice * 100) : 0;
 
-  // Sparkline: last 30 close prices
   const sparkline = candles.slice(-30).map(c => c.close);
 
   return { price, dailyChange, weeklyChange, sparkline };
