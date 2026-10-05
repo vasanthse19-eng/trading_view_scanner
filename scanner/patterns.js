@@ -304,7 +304,43 @@ function scanAllPatterns(candles, opts = {}) {
     const recencyPct = lastTouch / (slice.length - 1);
     const recencyScore = recencyPct > 0.85 ? 10 : recencyPct > 0.7 ? 5 : 0;
 
-    const score = Math.round(baseTouches + touchScore + fitScore + recencyScore);
+    // ── Breakout proximity — how close is current price to the pattern? ──
+    const currentPrice = slice[slice.length - 1].close;
+    const distFromRes = (currentPrice - resEnd) / resEnd;  // positive = above resistance
+    const distFromSup = (currentPrice - supEnd) / supEnd;  // negative = below support
+    const patternWidth = (resEnd - supEnd) / ((resEnd + supEnd) / 2);  // % width
+
+    let breakoutStatus, proximityScore;
+    if (currentPrice >= supEnd && currentPrice <= resEnd) {
+      // Price is inside the pattern (still forming)
+      const toRes = (resEnd - currentPrice) / resEnd;
+      const toSup = (currentPrice - supEnd) / supEnd;
+      if (toRes < 0.02 || toSup < 0.02) {
+        breakoutStatus = 'near_breakout';
+        proximityScore = 15;
+      } else {
+        breakoutStatus = 'inside';
+        proximityScore = 10;
+      }
+    } else if (distFromRes > 0 && distFromRes < 0.03) {
+      // Just broke above resistance (within 3%)
+      breakoutStatus = 'breaking_out';
+      proximityScore = 15;
+    } else if (distFromSup < 0 && Math.abs(distFromSup) < 0.03) {
+      // Just broke below support (within 3%)
+      breakoutStatus = 'breaking_out';
+      proximityScore = 15;
+    } else if (Math.abs(distFromRes) < 0.08 || Math.abs(distFromSup) < 0.08) {
+      // Moderately extended (3-8% beyond)
+      breakoutStatus = 'extended';
+      proximityScore = -10;
+    } else {
+      // Far extended (>8% beyond trendlines — old breakout)
+      breakoutStatus = 'far_extended';
+      proximityScore = -30;
+    }
+
+    const score = Math.round(baseTouches + touchScore + fitScore + recencyScore + proximityScore);
     if (score < 35) continue;
 
     // ── Price targets ──
@@ -349,6 +385,10 @@ function scanAllPatterns(candles, opts = {}) {
         windowCandles: slice.length,
         patternHeight,
         recency: recencyPct,
+        breakoutStatus,
+        distFromRes: Math.round(distFromRes * 10000) / 100,   // as percentage
+        distFromSup: Math.round(distFromSup * 10000) / 100,
+        currentPrice,
       },
     });
   }

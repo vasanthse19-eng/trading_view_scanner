@@ -123,6 +123,7 @@ function buildRowsJSON(scanResults) {
         stopLoss: pat.stopLoss,
         breakoutPrice: pat.breakoutPrice,
         touches: (pat.details && pat.details.totalTouches) || 0,
+        breakoutStatus: (pat.details && pat.details.breakoutStatus) || 'unknown',
         details: pat.details || {}
       });
     }
@@ -598,6 +599,14 @@ td.sparkline-cell svg { display: block; }
     </div>
     <div class="filter-sep"></div>
     <div class="filter-group">
+      <span class="filter-group-label">Breakout:</span>
+      <button class="filter-btn active" data-filter="breakout" data-value="all">All</button>
+      <button class="filter-btn" data-filter="breakout" data-value="actionable" style="color:#26a69a">🎯 Actionable</button>
+      <button class="filter-btn" data-filter="breakout" data-value="inside">Inside</button>
+      <button class="filter-btn" data-filter="breakout" data-value="extended">Extended</button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group">
       <span class="filter-group-label">Sector:</span>
       <select class="sort-select" id="sectorSelect">
         <option value="all">All Sectors</option>
@@ -747,6 +756,7 @@ td.sparkline-cell svg { display: block; }
     category: 'all',
     direction: 'all',
     timeframe: 'all',
+    breakout: 'all',
     sector: 'all',
     search: '',
     sort: 'confidence'
@@ -774,6 +784,13 @@ td.sparkline-cell svg { display: block; }
       if (filters.direction !== 'all' && r.direction !== filters.direction) return false;
       if (filters.timeframe !== 'all' && r.timeframe !== filters.timeframe) return false;
       if (filters.sector !== 'all' && r.sector !== filters.sector) return false;
+      if (filters.breakout === 'actionable') {
+        if (r.breakoutStatus !== 'near_breakout' && r.breakoutStatus !== 'breaking_out' && r.breakoutStatus !== 'inside') return false;
+      } else if (filters.breakout === 'inside') {
+        if (r.breakoutStatus !== 'inside' && r.breakoutStatus !== 'near_breakout') return false;
+      } else if (filters.breakout === 'extended') {
+        if (r.breakoutStatus !== 'extended' && r.breakoutStatus !== 'far_extended') return false;
+      }
       if (q && r.symbol.toLowerCase().indexOf(q) === -1 && r.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -829,12 +846,16 @@ td.sparkline-cell svg { display: block; }
       var wcClass = r.weeklyChange >= 0 ? 'change-positive' : 'change-negative';
       var cc = confColor(r.confidence);
 
+      var bsLabels = { near_breakout: '🎯 Near', breaking_out: '🔥 Breaking', inside: '📦 Inside', extended: '↗️ Extended', far_extended: '⏳ Old' };
+      var bsColors = { near_breakout: '#26a69a', breaking_out: '#f5c842', inside: '#2962ff', extended: '#787b86', far_extended: '#4a4a5a' };
+      var bsBadge = '<span style="display:inline-block;font-size:0.7rem;padding:1px 6px;border-radius:3px;background:' + (bsColors[r.breakoutStatus] || '#787b86') + '22;color:' + (bsColors[r.breakoutStatus] || '#787b86') + ';margin-left:4px;">' + (bsLabels[r.breakoutStatus] || '') + '</span>';
+
       html += '<tr data-idx="' + i + '" class="result-row">';
       html += '<td class="symbol-cell" data-label="Stock"><a class="symbol-link" href="/?symbol=' + encodeURIComponent(r.symbol) + '&market=' + (r.market || 'nse') + '" onclick="event.stopPropagation()">' + escapeHtml(r.symbol) + '</a><span class="stock-name">' + escapeHtml(r.name) + '</span></td>';
       html += '<td class="price-cell" data-label="Price">' + formatPrice(r.price) + '</td>';
       html += '<td class="change-cell ' + dcClass + '" data-label="Daily Chg">' + formatPct(r.dailyChange) + '</td>';
       html += '<td class="change-cell ' + wcClass + '" data-label="Weekly Chg">' + formatPct(r.weeklyChange) + '</td>';
-      html += '<td class="pattern-cell" data-label="Pattern">' + r.patternIcon + ' ' + escapeHtml(r.patternLabel) + '<br><span style="font-size:0.75rem;color:#787b86">' + capitalize(r.timeframe) + '</span></td>';
+      html += '<td class="pattern-cell" data-label="Pattern">' + r.patternIcon + ' ' + escapeHtml(r.patternLabel) + bsBadge + '<br><span style="font-size:0.75rem;color:#787b86">' + capitalize(r.timeframe) + '</span></td>';
       html += '<td data-label="Touches" style="text-align:center;font-weight:600;color:#d1d4dc">' + (r.touches || '-') + '</td>';
       html += '<td data-label="Confidence"><div class="confidence-bar-wrapper">';
       html += '<div class="confidence-bar-bg"><div class="confidence-bar-fill" style="width:' + r.confidence + '%;background:' + cc + '"></div></div>';
@@ -851,6 +872,7 @@ td.sparkline-cell svg { display: block; }
       html += '<div class="detail-item"><div class="detail-label">Direction</div><div class="detail-value" style="color:' + (r.direction === 'bullish' ? '#26a69a' : '#ef5350') + '">' + capitalize(r.direction) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Timeframe</div><div class="detail-value">' + capitalize(r.timeframe) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Breakout Price</div><div class="detail-value breakout">' + formatPrice(r.breakoutPrice) + '</div></div>';
+      html += '<div class="detail-item"><div class="detail-label">Status</div><div class="detail-value" style="color:' + (bsColors[r.breakoutStatus] || '#787b86') + '">' + (bsLabels[r.breakoutStatus] || r.breakoutStatus) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Target Price</div><div class="detail-value target">' + formatPrice(r.targetPrice) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Stop Loss</div><div class="detail-value stoploss">' + formatPrice(r.stopLoss) + '</div></div>';
       html += '<div class="detail-item"><div class="detail-label">Sector</div><div class="detail-value">' + escapeHtml(r.sector) + '</div></div>';
