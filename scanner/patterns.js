@@ -166,12 +166,13 @@ function classifyPattern(resLine, supLine, avgPrice, candleCount) {
   const startGap = (resLine.slope * 0 + resLine.intercept) - (supLine.slope * 0 + supLine.intercept);
   const endGap   = (resLine.slope * candleCount + resLine.intercept) - (supLine.slope * candleCount + supLine.intercept);
   const gapRatio = startGap > 0 ? endGap / startGap : 1;
-  const converging = gapRatio < 0.92 && endGap > 0;
+  // Converging if gap narrowed by ≥4%, OR if lines actually crossed (endGap ≤ 0)
+  const converging = startGap > 0 && (endGap <= 0 || gapRatio < 0.96);
 
-  // Check parallelism (slopes within 40% of each other)
+  // Check parallelism (slopes within 25% of each other, AND not converging)
   const slopeDiff = Math.abs(rSlope - sSlope);
   const avgSlope  = (Math.abs(rSlope) + Math.abs(sSlope)) / 2;
-  const parallel  = slopeDiff < flat * 2 || (avgSlope > 0 && slopeDiff / avgSlope < 0.4);
+  const parallel  = !converging && (slopeDiff < flat * 1.5 || (avgSlope > 0 && slopeDiff / avgSlope < 0.25));
 
   // ── Triangles (converging, at least one flat or opposing slopes) ──
   if ((rFlat || rRelFlat) && sRising && converging) {
