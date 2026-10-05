@@ -523,7 +523,7 @@ td.sparkline-cell svg { display: block; }
   </div>
   <div class="nav-actions">
     <button type="button" class="scan-btn secondary" id="refreshBtn">Refresh</button>
-    <select class="sort-select" id="batchSelect" style="margin-right:4px;padding:6px 8px;" title="Split NSE symbols into 4 batches to avoid timeout">
+    <select class="sort-select" id="batchSelect" style="margin-right:4px;padding:6px 8px;" title="Split symbols into batches to avoid timeout">
       <option value="">All Symbols</option>
       <option value="1">Batch 1</option>
       <option value="2">Batch 2</option>
@@ -1040,10 +1040,31 @@ td.sparkline-cell svg { display: block; }
     btn.addEventListener('click', function() {
       var tf = this.getAttribute('data-timeframe');
       var batchSelect = document.getElementById('batchSelect');
+
+      // Hourly-only scans use 3 batches, others use 4
+      var isHourly = tf === 'hourly';
+      var maxBatch = isHourly ? 3 : 4;
+      // Update batch dropdown options dynamically
+      if (batchSelect) {
+        var opts = batchSelect.options;
+        for (var i = 0; i < opts.length; i++) {
+          if (opts[i].value && parseInt(opts[i].value) > maxBatch) {
+            opts[i].style.display = 'none';
+          } else {
+            opts[i].style.display = '';
+          }
+        }
+        // Reset if selected batch exceeds max
+        if (batchSelect.value && parseInt(batchSelect.value) > maxBatch) {
+          batchSelect.value = '';
+        }
+      }
+
       var batch = batchSelect ? batchSelect.value : '';
       disableScanButtons();
 
-      var batchLabel = batch ? ' (Batch ' + batch + ')' : '';
+      var batchTotal = isHourly ? 3 : 4;
+      var batchLabel = batch ? ' (Batch ' + batch + '/' + batchTotal + ')' : '';
       var progress = document.getElementById('scanProgress');
       progress.classList.remove('hidden');
       setScanProgress(0, 'Starting ' + (tf === 'all' ? 'full' : tf) + batchLabel + ' scan...');

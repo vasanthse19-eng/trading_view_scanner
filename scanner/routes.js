@@ -32,11 +32,13 @@ router.post('/run', async (req, res) => {
     }
   }
 
-  // Validate batch: 1-4 or null
+  // Validate batch: 1-N (N depends on hourly vs daily/weekly)
+  const isHourlyOnly = timeframes && timeframes.length === 1 && timeframes[0] === 'hourly';
+  const maxBatch = isHourlyOnly ? scanner.HOURLY_BATCHES : scanner.TOTAL_BATCHES;
   let batchNum = null;
   if (batch != null) {
     batchNum = parseInt(batch);
-    if (isNaN(batchNum) || batchNum < 1 || batchNum > scanner.TOTAL_BATCHES) batchNum = null;
+    if (isNaN(batchNum) || batchNum < 1 || batchNum > maxBatch) batchNum = null;
   }
 
   const scanPromise = scanner.runScan({

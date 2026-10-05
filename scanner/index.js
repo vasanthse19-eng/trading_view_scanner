@@ -34,17 +34,41 @@ const TIMEFRAMES = [
   { key: 'weekly', label: 'Weekly', minCandles: 30 },
 ];
 
-// Batch splitting — NSE symbols split into 4 parts, non-NSE always included
-const TOTAL_BATCHES = 4;
+// Batch splitting — NSE symbols split into N parts, non-NSE always included
+const TOTAL_BATCHES = 4;    // daily/weekly: 4 batches of ~670
+const HOURLY_BATCHES = 3;   // hourly: 3 batches of ~325 (curated list)
 
-function getSymbolsForBatch(batch, allSymbols) {
-  if (!batch || batch < 1 || batch > TOTAL_BATCHES) return allSymbols;
+function getSymbolsForBatch(batch, allSymbols, totalBatches = TOTAL_BATCHES) {
+  if (!batch || batch < 1 || batch > totalBatches) return allSymbols;
   const nse = allSymbols.filter(s => s.market === 'nse');
   const nonNse = allSymbols.filter(s => s.market !== 'nse');
-  const chunkSize = Math.ceil(nse.length / TOTAL_BATCHES);
+  const chunkSize = Math.ceil(nse.length / totalBatches);
   const start = (batch - 1) * chunkSize;
   const end = Math.min(start + chunkSize, nse.length);
   return [...nse.slice(start, end), ...nonNse];
+}
+
+// ─── Hourly Symbol List (Nifty 500 + extras ≈ 1000 total) ──
+
+function buildHourlySymbolList() {
+  const NIFTY_500 = require('./hourly-symbols');
+
+  // Priority: all Nifty 500 members first
+  const niftyStocks = NSE_SYMBOLS.filter(s => NIFTY_500.has(s.symbol));
+  // Pad with additional NSE stocks (not in Nifty 500) to reach ~900 NSE total
+  const extras = NSE_SYMBOLS.filter(s => !NIFTY_500.has(s.symbol)).slice(0, 400);
+  const nseList = [...niftyStocks, ...extras].map(s => ({ ...s, market: 'nse' }));
+
+  // Always include all non-NSE (US, Crypto, Commodities)
+  const nonNse = [
+    ...US_STOCKS.map(s => ({ ...s, market: 'us' })),
+    ...CRYPTO.map(s => ({ ...s, market: 'crypto' })),
+    ...COMMODITIES.map(s => ({ ...s, market: 'commodities' })),
+  ];
+
+  const list = [...nseList, ...nonNse];
+  console.log(`📋 Hourly symbol list: ${niftyStocks.length} Nifty 500 + ${extras.length} extras + ${nonNse.length} non-NSE = ${list.length} total`);
+  return list;
 }
 
 // ─── Scan History ────────────────────────────────────────
@@ -220,17 +244,21 @@ async function runScan(options = {}) {
 
   const isPartialScan = activeTimeframes.length < TIMEFRAMES.length || batch != null;
 
-  const allSymbols = overrideSymbols || buildSymbolList({
-    includeNSE, includeUS, includeCrypto, includeCommodities, nseLimit
-  });
-  const symbols = getSymbolsForBatch(batch, allSymbols);
+  // Detect hourly-only scan → use curated smaller list + 3-batch split
+  const isHourlyOnly = activeTimeframes.length === 1 && activeTimeframes[0].key === 'hourly';
+  const effectiveBatches = isHourlyOnly ? HOURLY_BATCHES : TOTAL_BATCHES;
+
+  const allSymbols = overrideSymbols || (isHourlyOnly
+    ? buildHourlySymbolList()
+    : buildSymbolList({ includeNSE, includeUS, includeCrypto, includeCommodities, nseLimit }));
+  const symbols = getSymbolsForBatch(batch, allSymbols, effectiveBatches);
 
   scanState.running = true;
-  scanState.progress = { scanned: 0, total: symbols.length, currentSymbol: '', phase: 'starting', batch: batch || null, batchTotal: TOTAL_BATCHES };
+  scanState.progress = { scanned: 0, total: symbols.length, currentSymbol: '', phase: 'starting', batch: batch || null, batchTotal: effectiveBatches };
 
   const startTime = Date.now();
   const tfLabels = activeTimeframes.map(t => t.label).join(', ');
-  const batchLabel = batch ? ` (Batch ${batch}/${TOTAL_BATCHES})` : '';
+  const batchLabel = batch ? ` (Batch ${batch}/${effectiveBatches})` : '';
   console.log(`\n🔍 ═══════════════════════════════════════════════`);
   console.log(`🔍  Pattern Scanner Starting — ${symbols.length} symbols${batchLabel}`);
   console.log(`🔍  Timeframes: ${tfLabels}${isPartialScan ? ' (partial)' : ''}`);
@@ -345,7 +373,7 @@ async function runScan(options = {}) {
       patternsFound: allResults.reduce((sum, r) => sum + r.patterns.length, 0),
       timeframesScanned: activeTimeframes.map(t => t.key),
       batch: batch || null,
-      batchTotal: TOTAL_BATCHES,
+      batchTotal: effectiveBatches,
       markets: {
         nse: includeNSE ? NSE_SYMBOLS.length : 0,
         us: includeUS ? US_STOCKS.length : 0,
@@ -511,9 +539,11 @@ module.exports = {
   runScan,
   getState,
   buildSymbolList,
+  buildHourlySymbolList,
   loadHistory,
   DASHBOARD_FILE,
   RESULTS_FILE,
   HISTORY_FILE,
   TOTAL_BATCHES,
+  HOURLY_BATCHES,
 };

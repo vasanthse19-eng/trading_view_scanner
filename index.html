@@ -2846,12 +2846,29 @@ const UIController = {
         const tf = opt.getAttribute('data-scan-tf');
         scanDropdown.style.display = 'none';
 
+        // Hourly uses 3 batches, others use 4
+        const maxBatch = tf === 'hourly' ? 3 : 4;
+        // Hide/show B4 button based on timeframe
+        document.querySelectorAll('.scan-batch-opt').forEach(b => {
+          const bv = b.getAttribute('data-batch');
+          if (bv && parseInt(bv) > maxBatch) b.style.display = 'none';
+          else b.style.display = '';
+        });
+        // Reset batch if exceeds max
+        if (selectedScanBatch && parseInt(selectedScanBatch) > maxBatch) {
+          selectedScanBatch = '';
+          document.querySelectorAll('.scan-batch-opt').forEach(b => {
+            b.style.background = b.getAttribute('data-batch') === '' ? '#2a2e3e' : 'none';
+            b.style.color = b.getAttribute('data-batch') === '' ? '#d1d4dc' : '#787b86';
+          });
+        }
+
         const origText = scanBtn.innerHTML;
         scanBtn.disabled = true;
         scanBtn.style.opacity = '0.6';
 
         const tfLabel = tf === 'all' ? 'All' : tf === 'hourly' ? '1H' : tf.charAt(0).toUpperCase() + tf.slice(1);
-        const batchSuffix = selectedScanBatch ? ` B${selectedScanBatch}` : '';
+        const batchSuffix = selectedScanBatch ? ` B${selectedScanBatch}/${maxBatch}` : '';
 
         try {
           const body = tf === 'all' ? {} : { timeframe: tf };
