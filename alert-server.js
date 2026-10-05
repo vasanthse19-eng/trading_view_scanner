@@ -488,11 +488,27 @@ app.get('/api/yahoo/search', async (req, res) => {
 // ==================== SCANNER ====================
 const scannerRoutes = require('./scanner/routes');
 const scanner = require('./scanner/index');
+const { generateDashboard } = require('./scanner/dashboard');
 app.use('/api/scanner', scannerRoutes);
 
 // Make sendTelegram available to scanner routes
 app.locals.sendTelegram = sendTelegram;
 app.locals.dashboardUrl = process.env.RENDER_EXTERNAL_URL || process.env.DASHBOARD_URL || '';
+
+// Regenerate dashboard from existing results on startup (picks up template changes)
+try {
+  const fs = require('fs');
+  if (fs.existsSync(scanner.RESULTS_FILE)) {
+    const data = JSON.parse(fs.readFileSync(scanner.RESULTS_FILE, 'utf8'));
+    if (data.results && data.meta) {
+      const html = generateDashboard(data.results, data.meta);
+      fs.writeFileSync(scanner.DASHBOARD_FILE, html, 'utf8');
+      console.log('📄 Dashboard regenerated from existing results on startup');
+    }
+  }
+} catch (e) {
+  console.log('⚠️ Could not regenerate dashboard on startup:', e.message);
+}
 
 // ==================== STATIC FILES ====================
 app.use(express.static(path.join(__dirname)));
