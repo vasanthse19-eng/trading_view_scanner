@@ -518,6 +518,7 @@ td.sparkline-cell svg { display: block; }
   <div class="nav-links">
     <a href="/" class="nav-link">Charts</a>
     <a href="/api/scanner/dashboard" class="nav-link active" id="navScannerLink">Scanner</a>
+    <a href="/pattern-viewer.html" class="nav-link">🔍 Pattern Viewer</a>
     <button type="button" class="nav-link" id="stockListToggleBtn">Stock List</button>
     <button type="button" class="nav-link" id="historyToggleBtn">History</button>
   </div>

@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pattern Viewer — TradeView Pro</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0e17; color:#d1d4dc; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* ── Nav bar ── */
+  .nav-bar { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; background:#131722; border-bottom:1px solid #2a2e3e; flex-shrink:0; }
+  .nav-links { display:flex; gap:6px; }
+  .nav-link { color:#787b86; text-decoration:none; font-size:13px; padding:6px 12px; border-radius:4px; transition:all 0.15s; }
+  .nav-link:hover { color:#d1d4dc; background:#1e222d; }
+  .nav-link.active { color:#d1d4dc; background:#2962ff; }
+  .nav-title { font-size:15px; font-weight:600; color:#d1d4dc; }
+
+  /* ── Main layout ── */
+  .main { display:flex; flex:1; overflow:hidden; }
+
+  /* ── Left panel ── */
+  .left-panel { width:320px; min-width:280px; border-right:1px solid #2a2e3e; display:flex; flex-direction:column; background:#0f1319; }
+  .filter-bar { padding:8px; border-bottom:1px solid #2a2e3e; display:flex; flex-direction:column; gap:6px; flex-shrink:0; }
+  .filter-row { display:flex; gap:4px; flex-wrap:wrap; }
+  .filter-btn { padding:4px 8px; font-size:11px; border-radius:3px; border:1px solid #2a2e3e; background:none; color:#787b86; cursor:pointer; font-family:inherit; transition:all 0.15s; }
+  .filter-btn:hover { color:#d1d4dc; border-color:#363a45; }
+  .filter-btn.active { background:#2a2e3e; color:#d1d4dc; border-color:#363a45; }
+  .search-input { width:100%; padding:6px 10px; font-size:12px; border-radius:4px; border:1px solid #2a2e3e; background:#131722; color:#d1d4dc; font-family:inherit; outline:none; }
+  .search-input:focus { border-color:#2962ff; }
+  .search-input::placeholder { color:#787b86; }
+  .filter-label { font-size:10px; color:#787b86; text-transform:uppercase; letter-spacing:0.5px; padding:2px 0 0; }
+  .stock-count { font-size:11px; color:#787b86; padding:4px 10px; border-bottom:1px solid #1e222d; flex-shrink:0; }
+
+  /* ── Stock list ── */
+  .stock-list { flex:1; overflow-y:auto; }
+  .stock-list::-webkit-scrollbar { width:6px; }
+  .stock-list::-webkit-scrollbar-track { background:#0f1319; }
+  .stock-list::-webkit-scrollbar-thumb { background:#2a2e3e; border-radius:3px; }
+  .stock-item { padding:10px 12px; border-bottom:1px solid #1a1e2a; cursor:pointer; transition:background 0.12s; }
+  .stock-item:hover { background:#1a1e2e; }
+  .stock-item.active { background:#1e2738; border-left:3px solid #2962ff; }
+  .stock-item-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
+  .stock-symbol { font-size:13px; font-weight:600; color:#d1d4dc; }
+  .stock-price { font-size:12px; color:#787b86; }
+  .stock-item-body { display:flex; justify-content:space-between; align-items:center; }
+  .stock-pattern { font-size:11px; color:#787b86; }
+  .stock-badges { display:flex; gap:4px; align-items:center; }
+  .badge { font-size:10px; padding:2px 6px; border-radius:3px; font-weight:500; }
+  .badge-bullish { background:rgba(38,166,154,0.15); color:#26a69a; }
+  .badge-bearish { background:rgba(239,83,80,0.15); color:#ef5350; }
+  .badge-neutral { background:rgba(255,235,59,0.15); color:#ffeb3b; }
+  .badge-conf { background:rgba(41,98,255,0.15); color:#5b8def; }
+  .badge-near { background:rgba(255,152,0,0.15); color:#ff9800; }
+  .badge-breaking { background:rgba(76,175,80,0.15); color:#4caf50; }
+  .badge-tf { background:rgba(156,39,176,0.15); color:#ce93d8; }
+
+  /* ── Right panel ── */
+  .right-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* ── Chart header ── */
+  .chart-header { padding:10px 16px; border-bottom:1px solid #2a2e3e; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; background:#131722; }
+  .chart-header-left { display:flex; align-items:center; gap:12px; }
+  .chart-symbol { font-size:18px; font-weight:700; color:#d1d4dc; }
+  .chart-name { font-size:12px; color:#787b86; }
+  .chart-price-info { display:flex; gap:8px; align-items:baseline; }
+  .chart-price { font-size:16px; font-weight:600; }
+  .chart-change { font-size:13px; }
+  .chart-change.up { color:#26a69a; }
+  .chart-change.down { color:#ef5350; }
+
+  /* ── Pattern tabs ── */
+  .pattern-tabs { display:flex; gap:4px; padding:8px 16px; border-bottom:1px solid #2a2e3e; flex-shrink:0; background:#0f1319; flex-wrap:wrap; }
+  .pattern-tab { padding:5px 12px; font-size:12px; border-radius:4px; border:1px solid #2a2e3e; background:none; color:#787b86; cursor:pointer; font-family:inherit; transition:all 0.15s; }
+  .pattern-tab:hover { color:#d1d4dc; border-color:#363a45; }
+  .pattern-tab.active { background:#2962ff; color:#fff; border-color:#2962ff; }
+
+  /* ── Chart container ── */
+  .chart-container { flex:1; position:relative; min-height:0; }
+  .chart-container .tv-lightweight-charts { width:100%!important; height:100%!important; }
+  .chart-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(10,14,23,0.85); z-index:10; }
+  .chart-loading-text { color:#787b86; font-size:14px; }
+  .chart-error { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(10,14,23,0.9); z-index:10; gap:12px; }
+  .chart-error-text { color:#ef5350; font-size:14px; }
+  .retry-btn { padding:6px 16px; font-size:12px; border-radius:4px; border:1px solid #2a2e3e; background:#1e222d; color:#d1d4dc; cursor:pointer; font-family:inherit; }
+  .retry-btn:hover { background:#2a2e3e; }
+  .chart-placeholder { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .chart-placeholder-text { color:#363a45; font-size:16px; }
+
+  /* ── Info card ── */
+  .info-card { padding:12px 16px; border-top:1px solid #2a2e3e; background:#131722; flex-shrink:0; }
+  .info-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; }
+  .info-item { display:flex; flex-direction:column; gap:2px; }
+  .info-label { font-size:10px; color:#787b86; text-transform:uppercase; letter-spacing:0.5px; }
+  .info-value { font-size:13px; font-weight:500; color:#d1d4dc; }
+  .info-value.bullish { color:#26a69a; }
+  .info-value.bearish { color:#ef5350; }
+
+  /* ── Legend ── */
+  .chart-legend { position:absolute; top:8px; left:12px; z-index:5; display:flex; gap:12px; font-size:11px; pointer-events:none; }
+  .legend-item { display:flex; align-items:center; gap:4px; }
+  .legend-dot { width:10px; height:3px; border-radius:1px; }
+
+  /* hidden */
+  .hidden { display:none!important; }
+</style>
+</head>
+<body>
+
+<!-- ═══ NAV BAR ═══ -->
+<div class="nav-bar">
+  <div class="nav-links">
+    <a href="/" class="nav-link">📈 Charts</a>
+    <a href="/api/scanner/dashboard" class="nav-link">📊 Scanner</a>
+    <a href="/pattern-viewer.html" class="nav-link active">🔍 Pattern Viewer</a>
+  </div>
+  <div class="nav-title">Pattern Viewer</div>
+</div>
+
+<!-- ═══ MAIN ═══ -->
+<div class="main">
+
+  <!-- ── Left panel: filters + stock list ── -->
+  <div class="left-panel">
+    <div class="filter-bar">
+      <input type="text" class="search-input" id="searchInput" placeholder="🔍 Search symbol or name...">
+
+      <div class="filter-label">Pattern</div>
+      <div class="filter-row" id="patternFilters">
+        <button class="filter-btn active" data-filter="pattern" data-value="all">All</button>
+        <button class="filter-btn" data-filter="pattern" data-value="triangles">📐 Triangles</button>
+        <button class="filter-btn" data-filter="pattern" data-value="channels">📈 Channels</button>
+        <button class="filter-btn" data-filter="pattern" data-value="wedges">🔺 Wedges</button>
+      </div>
+
+      <div class="filter-label">Timeframe</div>
+      <div class="filter-row" id="tfFilters">
+        <button class="filter-btn active" data-filter="timeframe" data-value="all">All</button>
+        <button class="filter-btn" data-filter="timeframe" data-value="hourly">1H</button>
+        <button class="filter-btn" data-filter="timeframe" data-value="daily">Daily</button>
+        <button class="filter-btn" data-filter="timeframe" data-value="weekly">Weekly</button>
+      </div>
+
+      <div class="filter-label">Breakout</div>
+      <div class="filter-row" id="breakoutFilters">
+        <button class="filter-btn active" data-filter="breakout" data-value="all">All</button>
+        <button class="filter-btn" data-filter="breakout" data-value="actionable">🎯 Actionable</button>
+        <button class="filter-btn" data-filter="breakout" data-value="inside">Inside</button>
+        <button class="filter-btn" data-filter="breakout" data-value="breaking_out">Breaking</button>
+      </div>
+    </div>
+    <div class="stock-count" id="stockCount">Loading...</div>
+    <div class="stock-list" id="stockList"></div>
+  </div>
+
+  <!-- ── Right panel: chart + info ── -->
+  <div class="right-panel">
+    <div class="chart-header" id="chartHeader">
+      <div class="chart-header-left">
+        <span class="chart-symbol" id="chartSymbol">—</span>
+        <span class="chart-name" id="chartName"></span>
+      </div>
+      <div class="chart-price-info">
+        <span class="chart-price" id="chartPrice"></span>
+        <span class="chart-change" id="chartChange"></span>
+      </div>
+    </div>
+    <div class="pattern-tabs" id="patternTabs"></div>
+    <div class="chart-container" id="chartContainer">
+      <div class="chart-legend hidden" id="chartLegend">
+        <div class="legend-item"><div class="legend-dot" style="background:#ef5350;"></div> Resistance</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#26a69a;"></div> Support</div>
+      </div>
+      <div class="chart-placeholder" id="chartPlaceholder">
+        <div class="chart-placeholder-text">← Select a stock to view its pattern</div>
+      </div>
+      <div class="chart-loading hidden" id="chartLoading">
+        <div class="chart-loading-text">⏳ Loading chart data...</div>
+      </div>
+      <div class="chart-error hidden" id="chartError">
+        <div class="chart-error-text" id="chartErrorText">Failed to load chart</div>
+        <button class="retry-btn" id="retryBtn">Retry</button>
+      </div>
+    </div>
+    <div class="info-card" id="infoCard">
+      <div class="info-grid" id="infoGrid">
+        <div class="info-item"><span class="info-label">Pattern</span><span class="info-value" id="infoPattern">—</span></div>
+        <div class="info-item"><span class="info-label">Direction</span><span class="info-value" id="infoDirection">—</span></div>
+        <div class="info-item"><span class="info-label">Confidence</span><span class="info-value" id="infoConf">—</span></div>
+        <div class="info-item"><span class="info-label">Breakout</span><span class="info-value" id="infoBreakout">—</span></div>
+        <div class="info-item"><span class="info-label">Target</span><span class="info-value" id="infoTarget">—</span></div>
+        <div class="info-item"><span class="info-label">Stop Loss</span><span class="info-value" id="infoSL">—</span></div>
+        <div class="info-item"><span class="info-label">Touches</span><span class="info-value" id="infoTouches">—</span></div>
+        <div class="info-item"><span class="info-label">Breakout Status</span><span class="info-value" id="infoStatus">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+// PATTERN ICONS & LABELS
+// ═══════════════════════════════════════════════════════════════
+
+const PATTERN_ICONS = {
+  ascending_triangle:'📐⬆️', descending_triangle:'📐⬇️', symmetrical_triangle:'📐↔️',
+  ascending_channel:'📈⬆️', descending_channel:'📉⬇️', rectangle:'⬜',
+  rising_wedge:'🔺⬇️', falling_wedge:'🔻⬆️',
+};
+
+const PATTERN_LABELS = {
+  ascending_triangle:'Asc Triangle', descending_triangle:'Desc Triangle', symmetrical_triangle:'Sym Triangle',
+  ascending_channel:'Asc Channel', descending_channel:'Desc Channel', rectangle:'Rectangle',
+  rising_wedge:'Rising Wedge', falling_wedge:'Falling Wedge',
+};
+
+const PATTERN_CATEGORIES = {
+  ascending_triangle:'triangles', descending_triangle:'triangles', symmetrical_triangle:'triangles',
+  ascending_channel:'channels', descending_channel:'channels', rectangle:'channels',
+  rising_wedge:'wedges', falling_wedge:'wedges',
+};
+
+const TF_PARAMS = {
+  hourly: { range:'2y', interval:'60m' },
+  daily:  { range:'2y', interval:'1d'  },
+  weekly: { range:'5y', interval:'1wk' },
+};
+
+const IST_OFFSET = 19800; // +5:30 in seconds
+
+// ═══════════════════════════════════════════════════════════════
+// DATA STORE
+// ═══════════════════════════════════════════════════════════════
+
+const DataStore = {
+  allStocks: [],
+  filteredStocks: [],
+  selectedIndex: -1,
+  filters: { pattern: 'all', timeframe: 'all', breakout: 'all', search: '' },
+  candleCache: new Map(),
+
+  async load() {
+    try {
+      const resp = await fetch('/api/scanner/results');
+      const data = await resp.json();
+      this.allStocks = (data.results || []).filter(s => s.patterns && s.patterns.length > 0);
+      this.applyFilters();
+    } catch (e) {
+      console.error('Failed to load results:', e);
+      this.allStocks = [];
+      this.filteredStocks = [];
+    }
+  },
+
+  applyFilters() {
+    let list = this.allStocks;
+    const f = this.filters;
+
+    if (f.search) {
+      const q = f.search.toLowerCase();
+      list = list.filter(s => s.symbol.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q));
+    }
+
+    if (f.timeframe !== 'all') {
+      list = list.filter(s => s.patterns.some(p => p.timeframe === f.timeframe));
+    }
+
+    if (f.pattern !== 'all') {
+      list = list.filter(s => s.patterns.some(p => PATTERN_CATEGORIES[p.pattern] === f.pattern));
+    }
+
+    if (f.breakout !== 'all') {
+      if (f.breakout === 'actionable') {
+        list = list.filter(s => s.patterns.some(p =>
+          p.details && ['near_breakout','breaking_out','inside'].includes(p.details.breakoutStatus)));
+      } else {
+        list = list.filter(s => s.patterns.some(p =>
+          p.details && p.details.breakoutStatus === f.breakout));
+      }
+    }
+
+    // Sort by max confidence
+    list.sort((a, b) => {
+      const aMax = Math.max(...a.patterns.map(p => p.confidence));
+      const bMax = Math.max(...b.patterns.map(p => p.confidence));
+      return bMax - aMax;
+    });
+
+    this.filteredStocks = list;
+
+    // Clamp selected index
+    if (this.selectedIndex >= list.length) this.selectedIndex = list.length - 1;
+    if (this.selectedIndex < 0 && list.length > 0) this.selectedIndex = 0;
+  },
+
+  getSelectedStock() {
+    return this.filteredStocks[this.selectedIndex] || null;
+  },
+
+  // Get best pattern for the current stock (respecting timeframe filter)
+  getBestPattern(stock) {
+    if (!stock) return null;
+    let patterns = stock.patterns;
+    const f = this.filters;
+    if (f.timeframe !== 'all') patterns = patterns.filter(p => p.timeframe === f.timeframe);
+    if (f.pattern !== 'all') patterns = patterns.filter(p => PATTERN_CATEGORIES[p.pattern] === f.pattern);
+    if (!patterns.length) patterns = stock.patterns;
+    return patterns.reduce((best, p) => (!best || p.confidence > best.confidence) ? p : best, null);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// STOCK LIST (Left panel)
+// ═══════════════════════════════════════════════════════════════
+
+const StockList = {
+  el: null,
+
+  init() {
+    this.el = document.getElementById('stockList');
+    this.el.addEventListener('click', (e) => {
+      const item = e.target.closest('.stock-item');
+      if (!item) return;
+      const idx = parseInt(item.dataset.index);
+      if (isNaN(idx)) return;
+      DataStore.selectedIndex = idx;
+      this.highlight();
+      ChartPanel.loadStock(DataStore.getSelectedStock());
+      App.updateHash();
+    });
+  },
+
+  render() {
+    const stocks = DataStore.filteredStocks;
+    document.getElementById('stockCount').textContent =
+      stocks.length + ' stock' + (stocks.length !== 1 ? 's' : '') + ' with patterns';
+
+    if (!stocks.length) {
+      this.el.innerHTML = '<div style="padding:24px;text-align:center;color:#787b86;">No matching patterns found</div>';
+      return;
+    }
+
+    let html = '';
+    for (let i = 0; i < stocks.length; i++) {
+      const s = stocks[i];
+      const p = DataStore.getBestPattern(s);
+      if (!p) continue;
+      const active = i === DataStore.selectedIndex ? ' active' : '';
+      const icon = PATTERN_ICONS[p.pattern] || '📊';
+      const label = PATTERN_LABELS[p.pattern] || p.pattern;
+      const dirClass = p.direction === 'bullish' ? 'badge-bullish' : p.direction === 'bearish' ? 'badge-bearish' : 'badge-neutral';
+      const bsClass = (p.details && p.details.breakoutStatus === 'near_breakout') ? 'badge-near'
+                    : (p.details && p.details.breakoutStatus === 'breaking_out') ? 'badge-breaking' : '';
+      const bsLabel = p.details ? (p.details.breakoutStatus || '').replace(/_/g, ' ') : '';
+      const currency = s.market === 'nse' ? '₹' : '$';
+      const priceStr = s.price ? currency + Number(s.price).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '';
+
+      html += '<div class="stock-item' + active + '" data-index="' + i + '">'
+        + '<div class="stock-item-header">'
+        +   '<span class="stock-symbol">' + s.symbol.replace('.NS','') + '</span>'
+        +   '<span class="stock-price">' + priceStr + '</span>'
+        + '</div>'
+        + '<div class="stock-item-body">'
+        +   '<span class="stock-pattern">' + icon + ' ' + label + ' [' + p.timeframe + ']</span>'
+        +   '<span class="stock-badges">'
+        +     '<span class="badge ' + dirClass + '">' + p.direction + '</span>'
+        +     '<span class="badge badge-conf">' + p.confidence + '%</span>'
+        +     (bsClass ? '<span class="badge ' + bsClass + '">' + bsLabel + '</span>' : '')
+        +   '</span>'
+        + '</div>'
+        + '</div>';
+    }
+    this.el.innerHTML = html;
+  },
+
+  highlight() {
+    const items = this.el.querySelectorAll('.stock-item');
+    items.forEach(item => {
+      const idx = parseInt(item.dataset.index);
+      if (idx === DataStore.selectedIndex) {
+        item.classList.add('active');
+        item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } else {
+        item.classList.remove('active');
+      }
+    });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// CHART PANEL (Right panel)
+// ═══════════════════════════════════════════════════════════════
+
+const ChartPanel = {
+  chart: null,
+  candleSeries: null,
+  volumeSeries: null,
+  resLine: null,
+  supLine: null,
+  currentStock: null,
+  currentPatternIdx: 0,
+  abortCtrl: null,
+
+  init() {
+    const container = document.getElementById('chartContainer');
+    this.chart = LightweightCharts.createChart(container, {
+      layout: { background: { type: 'solid', color: '#0a0e17' }, textColor: '#787b86', fontSize: 11 },
+      grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: '#363a45', width: 1, style: 3, labelBackgroundColor: '#2a2e3e' },
+        horzLine: { color: '#363a45', width: 1, style: 3, labelBackgroundColor: '#2a2e3e' },
+      },
+      rightPriceScale: { borderColor: '#2a2e3e', scaleMargins: { top: 0.1, bottom: 0.2 } },
+      timeScale: { borderColor: '#2a2e3e', timeVisible: true, secondsVisible: false },
+      handleScroll: true, handleScale: true,
+    });
+
+    this.candleSeries = this.chart.addCandlestickSeries({
+      upColor: '#26a69a', downColor: '#ef5350',
+      borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    });
+
+    this.volumeSeries = this.chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'vol',
+    });
+    this.chart.priceScale('vol').applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+
+    // Resize handler
+    const ro = new ResizeObserver(() => {
+      this.chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+    });
+    ro.observe(container);
+
+    // Retry button
+    document.getElementById('retryBtn').addEventListener('click', () => {
+      if (this.currentStock) this.loadStock(this.currentStock, this.currentPatternIdx);
+    });
+  },
+
+  async loadStock(stock, patternIdx) {
+    if (!stock) return;
+    this.currentStock = stock;
+
+    // Determine which pattern to show
+    const patterns = stock.patterns;
+    if (patternIdx === undefined || patternIdx === null) patternIdx = 0;
+    // Find highest confidence pattern if no specific index
+    if (patternIdx === 0) {
+      let bestIdx = 0, bestConf = 0;
+      patterns.forEach((p, i) => { if (p.confidence > bestConf) { bestConf = p.confidence; bestIdx = i; } });
+      patternIdx = bestIdx;
+    }
+    this.currentPatternIdx = patternIdx;
+    const pattern = patterns[patternIdx];
+    if (!pattern) return;
+
+    // Update header
+    const currency = stock.market === 'nse' ? '₹' : '$';
+    document.getElementById('chartSymbol').textContent = stock.symbol.replace('.NS', '');
+    document.getElementById('chartName').textContent = stock.name || '';
+    document.getElementById('chartPrice').textContent = stock.price ? currency + Number(stock.price).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '';
+    const chgEl = document.getElementById('chartChange');
+    if (stock.dailyChange != null) {
+      const sign = stock.dailyChange >= 0 ? '+' : '';
+      chgEl.textContent = sign + stock.dailyChange.toFixed(2) + '%';
+      chgEl.className = 'chart-change ' + (stock.dailyChange >= 0 ? 'up' : 'down');
+    } else {
+      chgEl.textContent = '';
+    }
+
+    // Render pattern tabs
+    this.renderTabs(stock, patternIdx);
+
+    // Show loading
+    document.getElementById('chartPlaceholder').classList.add('hidden');
+    document.getElementById('chartError').classList.add('hidden');
+    document.getElementById('chartLoading').classList.remove('hidden');
+    document.getElementById('chartLegend').classList.add('hidden');
+
+    // Cancel any pending fetch
+    if (this.abortCtrl) this.abortCtrl.abort();
+    this.abortCtrl = new AbortController();
+
+    try {
+      const candles = await this.fetchCandles(stock.symbol, pattern.timeframe, this.abortCtrl.signal);
+      if (!candles || !candles.length) throw new Error('No candle data returned');
+
+      this.drawChart(candles, pattern);
+      this.updateInfoCard(stock, pattern);
+
+      document.getElementById('chartLoading').classList.add('hidden');
+      document.getElementById('chartLegend').classList.remove('hidden');
+    } catch (e) {
+      if (e.name === 'AbortError') return; // user switched stock
+      console.error('Chart load error:', e);
+      document.getElementById('chartLoading').classList.add('hidden');
+      document.getElementById('chartErrorText').textContent = 'Failed to load chart: ' + e.message;
+      document.getElementById('chartError').classList.remove('hidden');
+    }
+  },
+
+  renderTabs(stock, activeIdx) {
+    const container = document.getElementById('patternTabs');
+    if (stock.patterns.length <= 1) {
+      container.innerHTML = '';
+      return;
+    }
+    let html = '';
+    stock.patterns.forEach((p, i) => {
+      const icon = PATTERN_ICONS[p.pattern] || '📊';
+      const label = PATTERN_LABELS[p.pattern] || p.pattern;
+      const active = i === activeIdx ? ' active' : '';
+      const tf = p.timeframe ? p.timeframe.charAt(0).toUpperCase() + p.timeframe.slice(1) : '';
+      html += '<button class="pattern-tab' + active + '" data-pidx="' + i + '">'
+        + icon + ' ' + tf + ': ' + label + ' (' + p.confidence + '%)</button>';
+    });
+    container.innerHTML = html;
+
+    // Tab click handlers
+    container.querySelectorAll('.pattern-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const idx = parseInt(tab.dataset.pidx);
+        this.loadStock(stock, idx);
+      });
+    });
+  },
+
+  async fetchCandles(symbol, timeframe, signal) {
+    const cacheKey = symbol + ':' + timeframe;
+    if (DataStore.candleCache.has(cacheKey)) return DataStore.candleCache.get(cacheKey);
+
+    const params = TF_PARAMS[timeframe] || TF_PARAMS.daily;
+    const url = '/api/yahoo/chart/' + encodeURIComponent(symbol) + '?range=' + params.range + '&interval=' + params.interval;
+    const resp = await fetch(url, { signal });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    const result = data.chart && data.chart.result && data.chart.result[0];
+    if (!result || !result.timestamp) throw new Error('No chart data');
+
+    const parsed = this.parseCandles(result, params.interval);
+    DataStore.candleCache.set(cacheKey, parsed);
+    return parsed;
+  },
+
+  parseCandles(result, interval) {
+    const ts = result.timestamp;
+    const q = result.indicators && result.indicators.quote && result.indicators.quote[0];
+    if (!ts || !q) return { candles: [], volumes: [] };
+
+    const intraday = ['1m','5m','15m','60m'].includes(interval);
+    const candles = [];
+    const volumes = [];
+
+    for (let i = 0; i < ts.length; i++) {
+      if (q.open && q.close && q.high && q.low &&
+          q.open[i] != null && q.close[i] != null && q.high[i] != null && q.low[i] != null) {
+        const time = intraday ? ts[i] + IST_OFFSET : ts[i];
+        candles.push({ time: time, open: q.open[i], high: q.high[i], low: q.low[i], close: q.close[i] });
+        volumes.push({
+          time: time,
+          value: (q.volume && q.volume[i]) || 0,
+          color: q.close[i] >= q.open[i] ? 'rgba(38,166,154,0.4)' : 'rgba(239,83,80,0.4)',
+        });
+      }
+    }
+    return { candles: candles, volumes: volumes };
+  },
+
+  drawChart(data, pattern) {
+    const { candles, volumes } = data;
+
+    // Set candle + volume data
+    this.candleSeries.setData(candles);
+    this.volumeSeries.setData(volumes);
+
+    // Remove old trendlines
+    if (this.resLine) { try { this.chart.removeSeries(this.resLine); } catch(e){} this.resLine = null; }
+    if (this.supLine) { try { this.chart.removeSeries(this.supLine); } catch(e){} this.supLine = null; }
+
+    // Draw trendlines from pattern anchors
+    if (pattern.details && pattern.details.resistance && pattern.details.support) {
+      this.drawTrendlines(candles, pattern);
+    }
+
+    // Fit content with some right margin
+    this.chart.timeScale().fitContent();
+  },
+
+  drawTrendlines(candles, pattern) {
+    const N = candles.length;
+    const res = pattern.details.resistance;
+    const sup = pattern.details.support;
+
+    // Map anchor indices to candle timestamps (with bounds clamping)
+    const resA1idx = Math.max(0, Math.min(res.anchor1.index, N - 1));
+    const resA2idx = Math.max(0, Math.min(res.anchor2.index, N - 1));
+    const supA1idx = Math.max(0, Math.min(sup.anchor1.index, N - 1));
+    const supA2idx = Math.max(0, Math.min(sup.anchor2.index, N - 1));
+
+    // Extension: 20 bars beyond anchor2 (or end of data)
+    const resExtIdx = Math.min(Math.max(resA2idx, supA2idx) + 20, N - 1);
+    const supExtIdx = resExtIdx;
+
+    // Calculate extended prices using slope
+    const resSlope = resA2idx !== resA1idx ? (res.anchor2.price - res.anchor1.price) / (resA2idx - resA1idx) : 0;
+    const supSlope = supA2idx !== supA1idx ? (sup.anchor2.price - sup.anchor1.price) / (supA2idx - supA1idx) : 0;
+    const resExtPrice = res.anchor2.price + resSlope * (resExtIdx - resA2idx);
+    const supExtPrice = sup.anchor2.price + supSlope * (supExtIdx - supA2idx);
+
+    // Resistance line (red)
+    this.resLine = this.chart.addLineSeries({
+      color: '#ef5350',
+      lineWidth: 2,
+      lineStyle: 0,
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const resData = [
+      { time: candles[resA1idx].time, value: res.anchor1.price },
+      { time: candles[resA2idx].time, value: res.anchor2.price },
+    ];
+    if (resExtIdx > resA2idx) {
+      resData.push({ time: candles[resExtIdx].time, value: resExtPrice });
+    }
+    this.resLine.setData(resData);
+
+    // Support line (green)
+    this.supLine = this.chart.addLineSeries({
+      color: '#26a69a',
+      lineWidth: 2,
+      lineStyle: 0,
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const supData = [
+      { time: candles[supA1idx].time, value: sup.anchor1.price },
+      { time: candles[supA2idx].time, value: sup.anchor2.price },
+    ];
+    if (supExtIdx > supA2idx) {
+      supData.push({ time: candles[supExtIdx].time, value: supExtPrice });
+    }
+    this.supLine.setData(supData);
+  },
+
+  updateInfoCard(stock, pattern) {
+    const currency = stock.market === 'nse' ? '₹' : '$';
+    const fmt = (v) => v != null ? currency + Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—';
+    const label = (PATTERN_LABELS[pattern.pattern] || pattern.pattern);
+    const icon = PATTERN_ICONS[pattern.pattern] || '📊';
+
+    document.getElementById('infoPattern').textContent = icon + ' ' + label;
+
+    const dirEl = document.getElementById('infoDirection');
+    dirEl.textContent = pattern.direction;
+    dirEl.className = 'info-value ' + (pattern.direction === 'bullish' ? 'bullish' : pattern.direction === 'bearish' ? 'bearish' : '');
+
+    document.getElementById('infoConf').textContent = pattern.confidence + '%';
+    document.getElementById('infoBreakout').textContent = fmt(pattern.breakoutPrice);
+
+    const targetEl = document.getElementById('infoTarget');
+    targetEl.textContent = fmt(pattern.targetPrice);
+    targetEl.className = 'info-value bullish';
+
+    const slEl = document.getElementById('infoSL');
+    slEl.textContent = fmt(pattern.stopLoss);
+    slEl.className = 'info-value bearish';
+
+    const d = pattern.details || {};
+    document.getElementById('infoTouches').textContent =
+      (d.resistance ? d.resistance.touches : '?') + ' res / ' + (d.support ? d.support.touches : '?') + ' sup';
+
+    const status = d.breakoutStatus ? d.breakoutStatus.replace(/_/g, ' ') : '—';
+    const statusEl = document.getElementById('infoStatus');
+    statusEl.textContent = status;
+    statusEl.className = 'info-value' +
+      (['near_breakout','breaking_out'].includes(d.breakoutStatus) ? ' bullish' : d.breakoutStatus === 'far_extended' ? ' bearish' : '');
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// APP (Orchestration)
+// ═══════════════════════════════════════════════════════════════
+
+const App = {
+  async init() {
+    // Load data
+    await DataStore.load();
+
+    // Init components
+    StockList.init();
+    ChartPanel.init();
+
+    // Render stock list
+    StockList.render();
+
+    // Deep-link from hash
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const decoded = decodeURIComponent(hash);
+      const idx = DataStore.filteredStocks.findIndex(s => s.symbol === decoded || s.symbol.replace('.NS','') === decoded);
+      if (idx >= 0) DataStore.selectedIndex = idx;
+    }
+
+    // Load first stock
+    if (DataStore.filteredStocks.length > 0) {
+      StockList.highlight();
+      ChartPanel.loadStock(DataStore.getSelectedStock());
+      this.updateHash();
+    }
+
+    // Setup filters
+    this.setupFilters();
+
+    // Keyboard navigation
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault();
+        this.selectNext();
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault();
+        this.selectPrev();
+      }
+    });
+  },
+
+  setupFilters() {
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const filterType = btn.dataset.filter;
+        const value = btn.dataset.value;
+
+        // Toggle active state within group
+        btn.closest('.filter-row').querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        DataStore.filters[filterType] = value;
+        DataStore.applyFilters();
+        StockList.render();
+
+        // Load first stock after filter change
+        if (DataStore.filteredStocks.length > 0) {
+          DataStore.selectedIndex = 0;
+          StockList.highlight();
+          ChartPanel.loadStock(DataStore.getSelectedStock());
+          this.updateHash();
+        }
+      });
+    });
+
+    // Search
+    const searchInput = document.getElementById('searchInput');
+    let searchTimer;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        DataStore.filters.search = searchInput.value.trim();
+        DataStore.applyFilters();
+        StockList.render();
+        if (DataStore.filteredStocks.length > 0) {
+          DataStore.selectedIndex = 0;
+          StockList.highlight();
+          ChartPanel.loadStock(DataStore.getSelectedStock());
+          this.updateHash();
+        }
+      }, 250);
+    });
+  },
+
+  selectNext() {
+    if (DataStore.selectedIndex < DataStore.filteredStocks.length - 1) {
+      DataStore.selectedIndex++;
+      StockList.highlight();
+      ChartPanel.loadStock(DataStore.getSelectedStock());
+      this.updateHash();
+    }
+  },
+
+  selectPrev() {
+    if (DataStore.selectedIndex > 0) {
+      DataStore.selectedIndex--;
+      StockList.highlight();
+      ChartPanel.loadStock(DataStore.getSelectedStock());
+      this.updateHash();
+    }
+  },
+
+  updateHash() {
+    const stock = DataStore.getSelectedStock();
+    if (stock) {
+      const sym = stock.symbol.replace('.NS', '');
+      history.replaceState(null, '', '#' + encodeURIComponent(sym));
+    }
+  }
+};
+
+// ── Boot ──
+document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+</body>
+</html>
