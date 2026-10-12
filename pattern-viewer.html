@@ -148,6 +148,14 @@
         <button class="filter-btn" data-filter="breakout" data-value="actionable">🎯 Actionable</button>
         <button class="filter-btn" data-filter="breakout" data-value="inside">Inside</button>
         <button class="filter-btn" data-filter="breakout" data-value="breaking_out">Breaking</button>
+        <button class="filter-btn" data-filter="breakout" data-value="near_breakout">Near</button>
+      </div>
+
+      <div class="filter-label">Sort By</div>
+      <div class="filter-row" id="sortFilters">
+        <button class="filter-btn active" data-filter="sort" data-value="confidence">🏆 Confidence</button>
+        <button class="filter-btn" data-filter="sort" data-value="breakout_proximity">🎯 Near Breakout</button>
+        <button class="filter-btn" data-filter="sort" data-value="recently_broken">🔥 Recently Broken</button>
       </div>
     </div>
     <div class="stock-count" id="stockCount">Loading...</div>
@@ -239,7 +247,7 @@ const DataStore = {
   allStocks: [],
   filteredStocks: [],
   selectedIndex: -1,
-  filters: { pattern: 'all', timeframe: 'all', breakout: 'all', search: '' },
+  filters: { pattern: 'all', timeframe: 'all', breakout: 'all', sort: 'confidence', search: '' },
   candleCache: new Map(),
 
   async load() {
@@ -282,8 +290,29 @@ const DataStore = {
       }
     }
 
-    // Sort by max confidence
+    // Sort based on selected sort option
+    const sortMode = f.sort || 'confidence';
     list.sort((a, b) => {
+      if (sortMode === 'breakout_proximity') {
+        // Prioritize: near_breakout > breaking_out > inside > extended > far_extended
+        const proximityRank = { near_breakout: 0, breaking_out: 1, inside: 2, extended: 3, far_extended: 4 };
+        const aStatus = this._bestBreakoutStatus(a);
+        const bStatus = this._bestBreakoutStatus(b);
+        const aRank = proximityRank[aStatus] !== undefined ? proximityRank[aStatus] : 5;
+        const bRank = proximityRank[bStatus] !== undefined ? proximityRank[bStatus] : 5;
+        if (aRank !== bRank) return aRank - bRank;
+        // Tie-break by minimum distance from trendlines
+        const aDist = this._minTrendlineDist(a);
+        const bDist = this._minTrendlineDist(b);
+        return aDist - bDist;
+      }
+      if (sortMode === 'recently_broken') {
+        // Prioritize breaking_out with high recency, then near_breakout
+        const aScore = this._recentBreakoutScore(a);
+        const bScore = this._recentBreakoutScore(b);
+        return bScore - aScore;
+      }
+      // Default: confidence
       const aMax = Math.max(...a.patterns.map(p => p.confidence));
       const bMax = Math.max(...b.patterns.map(p => p.confidence));
       return bMax - aMax;
@@ -309,6 +338,49 @@ const DataStore = {
     if (f.pattern !== 'all') patterns = patterns.filter(p => PATTERN_CATEGORIES[p.pattern] === f.pattern);
     if (!patterns.length) patterns = stock.patterns;
     return patterns.reduce((best, p) => (!best || p.confidence > best.confidence) ? p : best, null);
+  },
+
+  // Helper: best breakout status across all patterns of a stock
+  _bestBreakoutStatus(stock) {
+    const rank = { near_breakout: 0, breaking_out: 1, inside: 2, extended: 3, far_extended: 4 };
+    let best = 'far_extended', bestRank = 5;
+    for (const p of stock.patterns) {
+      const s = p.details && p.details.breakoutStatus;
+      if (s && rank[s] !== undefined && rank[s] < bestRank) { best = s; bestRank = rank[s]; }
+    }
+    return best;
+  },
+
+  // Helper: minimum distance from trendlines (for proximity sorting)
+  _minTrendlineDist(stock) {
+    let minDist = Infinity;
+    for (const p of stock.patterns) {
+      if (!p.details) continue;
+      const dr = Math.abs(p.details.distFromRes || 100);
+      const ds = Math.abs(p.details.distFromSup || 100);
+      minDist = Math.min(minDist, dr, ds);
+    }
+    return minDist;
+  },
+
+  // Helper: score for "recently broken" sort — breaking_out with high recency scores highest
+  _recentBreakoutScore(stock) {
+    let best = 0;
+    for (const p of stock.patterns) {
+      if (!p.details) continue;
+      const status = p.details.breakoutStatus;
+      const recency = p.details.recency || 0;
+      let score = 0;
+      if (status === 'breaking_out') {
+        score = 100 + recency * 50 + p.confidence; // breaking out + recent = top
+      } else if (status === 'near_breakout') {
+        score = 50 + recency * 30 + p.confidence;  // near breakout next
+      } else if (status === 'inside' && recency > 0.85) {
+        score = 20 + recency * 20 + p.confidence;  // inside but recent touch
+      }
+      best = Math.max(best, score);
+    }
+    return best;
   }
 };
 
@@ -598,56 +670,60 @@ const ChartPanel = {
     const N = candles.length;
     const res = pattern.details.resistance;
     const sup = pattern.details.support;
+    const winSize = pattern.details.windowCandles || 120;
 
-    // Map anchor indices to candle timestamps (with bounds clamping)
-    const resA1idx = Math.max(0, Math.min(res.anchor1.index, N - 1));
-    const resA2idx = Math.max(0, Math.min(res.anchor2.index, N - 1));
-    const supA1idx = Math.max(0, Math.min(sup.anchor1.index, N - 1));
-    const supA2idx = Math.max(0, Math.min(sup.anchor2.index, N - 1));
+    // End-aligned: the analysis window covers the last `winSize` candles.
+    // Use slope/intercept (local window coordinates) to calculate exact prices.
+    // localIdx 0 = start of window, localIdx winSize-1 = end of window.
+    const windowStart = Math.max(0, N - winSize);
+    const windowEnd = N - 1;
 
-    // Extension: 20 bars beyond anchor2 (or end of data)
-    const resExtIdx = Math.min(Math.max(resA2idx, supA2idx) + 20, N - 1);
-    const supExtIdx = resExtIdx;
+    // Calculate prices at window boundaries using slope/intercept
+    // price = slope * localIdx + intercept
+    const resStartPrice = res.slope * 0 + res.intercept;
+    const resEndPrice   = res.slope * (winSize - 1) + res.intercept;
+    const supStartPrice = sup.slope * 0 + sup.intercept;
+    const supEndPrice   = sup.slope * (winSize - 1) + sup.intercept;
 
-    // Calculate extended prices using slope
-    const resSlope = resA2idx !== resA1idx ? (res.anchor2.price - res.anchor1.price) / (resA2idx - resA1idx) : 0;
-    const supSlope = supA2idx !== supA1idx ? (sup.anchor2.price - sup.anchor1.price) / (supA2idx - supA1idx) : 0;
-    const resExtPrice = res.anchor2.price + resSlope * (resExtIdx - resA2idx);
-    const supExtPrice = sup.anchor2.price + supSlope * (supExtIdx - supA2idx);
+    // Extension: 20 bars beyond the window end
+    const extBars = Math.min(20, N - 1 - windowEnd); // can't extend beyond data
+    const resExtPrice = res.slope * (winSize - 1 + 20) + res.intercept;
+    const supExtPrice = sup.slope * (winSize - 1 + 20) + sup.intercept;
+
+    // Build multi-point trendlines for precise alignment
+    // Sample every ~10% of the window so the line stays accurate through zoom
+    const samplePoints = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
 
     // Resistance line (red)
     this.resLine = this.chart.addLineSeries({
-      color: '#ef5350',
-      lineWidth: 2,
-      lineStyle: 0,
-      lastValueVisible: false,
-      priceLineVisible: false,
-      crosshairMarkerVisible: false,
+      color: '#ef5350', lineWidth: 2, lineStyle: 0,
+      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     });
-    const resData = [
-      { time: candles[resA1idx].time, value: res.anchor1.price },
-      { time: candles[resA2idx].time, value: res.anchor2.price },
-    ];
-    if (resExtIdx > resA2idx) {
-      resData.push({ time: candles[resExtIdx].time, value: resExtPrice });
+    const resData = [];
+    for (const frac of samplePoints) {
+      const localIdx = Math.round(frac * (winSize - 1));
+      const candleIdx = Math.min(windowStart + localIdx, N - 1);
+      resData.push({ time: candles[candleIdx].time, value: res.slope * localIdx + res.intercept });
+    }
+    // Extend beyond window
+    if (windowEnd + 20 < N) {
+      resData.push({ time: candles[Math.min(windowEnd + 20, N - 1)].time, value: resExtPrice });
     }
     this.resLine.setData(resData);
 
     // Support line (green)
     this.supLine = this.chart.addLineSeries({
-      color: '#26a69a',
-      lineWidth: 2,
-      lineStyle: 0,
-      lastValueVisible: false,
-      priceLineVisible: false,
-      crosshairMarkerVisible: false,
+      color: '#26a69a', lineWidth: 2, lineStyle: 0,
+      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     });
-    const supData = [
-      { time: candles[supA1idx].time, value: sup.anchor1.price },
-      { time: candles[supA2idx].time, value: sup.anchor2.price },
-    ];
-    if (supExtIdx > supA2idx) {
-      supData.push({ time: candles[supExtIdx].time, value: supExtPrice });
+    const supData = [];
+    for (const frac of samplePoints) {
+      const localIdx = Math.round(frac * (winSize - 1));
+      const candleIdx = Math.min(windowStart + localIdx, N - 1);
+      supData.push({ time: candles[candleIdx].time, value: sup.slope * localIdx + sup.intercept });
+    }
+    if (windowEnd + 20 < N) {
+      supData.push({ time: candles[Math.min(windowEnd + 20, N - 1)].time, value: supExtPrice });
     }
     this.supLine.setData(supData);
   },
