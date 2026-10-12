@@ -226,7 +226,7 @@ function classifyPattern(resLine, supLine, avgPrice, candleCount) {
 function scanAllPatterns(candles, opts = {}) {
   const {
     minCandles  = 40,
-    tolerance   = 0.015,
+    tolerance   = 0.010,
     minTouches  = 3,
     lookback    = 5,
     maxWindow   = 500,   // cap window size to avoid noise on huge datasets
@@ -341,7 +341,7 @@ function scanAllPatterns(candles, opts = {}) {
     }
 
     const score = Math.round(baseTouches + touchScore + fitScore + recencyScore + proximityScore);
-    if (score < 35) continue;
+    if (score < 45) continue;
 
     // ── Price targets ──
     const patternHeight = resEnd - supEnd;
@@ -393,15 +393,13 @@ function scanAllPatterns(candles, opts = {}) {
     });
   }
 
-  // Keep only the best pattern per type
-  const bestByType = {};
+  // Keep only the single highest-confidence pattern across all types and windows
+  let best = null;
   for (const r of results) {
-    if (!bestByType[r.pattern] || r.confidence > bestByType[r.pattern].confidence) {
-      bestByType[r.pattern] = r;
-    }
+    if (!best || r.confidence > best.confidence) best = r;
   }
 
-  return Object.values(bestByType).sort((a, b) => b.confidence - a.confidence);
+  return best ? [best] : [];
 }
 
 // ─── Exports ─────────────────────────────────────────────

@@ -473,7 +473,6 @@ const ChartPanel = {
   resLine: null,
   supLine: null,
   currentStock: null,
-  currentPatternIdx: 0,
   abortCtrl: null,
 
   init() {
@@ -512,25 +511,19 @@ const ChartPanel = {
 
     // Retry button
     document.getElementById('retryBtn').addEventListener('click', () => {
-      if (this.currentStock) this.loadStock(this.currentStock, this.currentPatternIdx);
+      if (this.currentStock) this.loadStock(this.currentStock);
     });
   },
 
-  async loadStock(stock, patternIdx) {
+  async loadStock(stock) {
     if (!stock) return;
     this.currentStock = stock;
 
-    // Determine which pattern to show
+    // Pick the single best pattern (highest confidence)
     const patterns = stock.patterns;
-    if (patternIdx === undefined || patternIdx === null) patternIdx = 0;
-    // Find highest confidence pattern if no specific index
-    if (patternIdx === 0) {
-      let bestIdx = 0, bestConf = 0;
-      patterns.forEach((p, i) => { if (p.confidence > bestConf) { bestConf = p.confidence; bestIdx = i; } });
-      patternIdx = bestIdx;
-    }
-    this.currentPatternIdx = patternIdx;
-    const pattern = patterns[patternIdx];
+    let bestIdx = 0, bestConf = 0;
+    patterns.forEach((p, i) => { if (p.confidence > bestConf) { bestConf = p.confidence; bestIdx = i; } });
+    const pattern = patterns[bestIdx];
     if (!pattern) return;
 
     // Update header
@@ -547,8 +540,14 @@ const ChartPanel = {
       chgEl.textContent = '';
     }
 
-    // Render pattern tabs
-    this.renderTabs(stock, patternIdx);
+    // Show pattern info badge instead of tabs
+    const icon = PATTERN_ICONS[pattern.pattern] || '📊';
+    const label = PATTERN_LABELS[pattern.pattern] || pattern.pattern;
+    const tf = pattern.timeframe ? pattern.timeframe.charAt(0).toUpperCase() + pattern.timeframe.slice(1) : '';
+    const dirClass = pattern.direction === 'bullish' ? 'badge-bullish' : pattern.direction === 'bearish' ? 'badge-bearish' : 'badge-neutral';
+    document.getElementById('patternTabs').innerHTML =
+      '<span class="badge ' + dirClass + '" style="font-size:13px;padding:5px 12px;">' +
+      icon + ' ' + tf + ': ' + label + ' (' + pattern.confidence + '%)</span>';
 
     // Show loading
     document.getElementById('chartPlaceholder').classList.add('hidden');
@@ -576,32 +575,6 @@ const ChartPanel = {
       document.getElementById('chartErrorText').textContent = 'Failed to load chart: ' + e.message;
       document.getElementById('chartError').classList.remove('hidden');
     }
-  },
-
-  renderTabs(stock, activeIdx) {
-    const container = document.getElementById('patternTabs');
-    if (stock.patterns.length <= 1) {
-      container.innerHTML = '';
-      return;
-    }
-    let html = '';
-    stock.patterns.forEach((p, i) => {
-      const icon = PATTERN_ICONS[p.pattern] || '📊';
-      const label = PATTERN_LABELS[p.pattern] || p.pattern;
-      const active = i === activeIdx ? ' active' : '';
-      const tf = p.timeframe ? p.timeframe.charAt(0).toUpperCase() + p.timeframe.slice(1) : '';
-      html += '<button class="pattern-tab' + active + '" data-pidx="' + i + '">'
-        + icon + ' ' + tf + ': ' + label + ' (' + p.confidence + '%)</button>';
-    });
-    container.innerHTML = html;
-
-    // Tab click handlers
-    container.querySelectorAll('.pattern-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        const idx = parseInt(tab.dataset.pidx);
-        this.loadStock(stock, idx);
-      });
-    });
   },
 
   async fetchCandles(symbol, timeframe, signal) {
@@ -671,59 +644,56 @@ const ChartPanel = {
     const res = pattern.details.resistance;
     const sup = pattern.details.support;
     const winSize = pattern.details.windowCandles || 120;
-
-    // End-aligned: the analysis window covers the last `winSize` candles.
-    // Use slope/intercept (local window coordinates) to calculate exact prices.
-    // localIdx 0 = start of window, localIdx winSize-1 = end of window.
     const windowStart = Math.max(0, N - winSize);
-    const windowEnd = N - 1;
 
-    // Calculate prices at window boundaries using slope/intercept
-    // price = slope * localIdx + intercept
-    const resStartPrice = res.slope * 0 + res.intercept;
-    const resEndPrice   = res.slope * (winSize - 1) + res.intercept;
-    const supStartPrice = sup.slope * 0 + sup.intercept;
-    const supEndPrice   = sup.slope * (winSize - 1) + sup.intercept;
+    // Reconstruct local window indices from anchor prices using slope/intercept.
+    // anchor.price = slope * localIdx + intercept  →  localIdx = (anchor.price - intercept) / slope
+    // Then map to current candle array: currentIdx = windowStart + localIdx
+    function anchorToIdx(anchor, line) {
+      if (Math.abs(line.slope) > 1e-10) {
+        const localIdx = (anchor.price - line.intercept) / line.slope;
+        return Math.max(0, Math.min(N - 1, Math.round(windowStart + localIdx)));
+      }
+      // Flat slope: use stored index with end-alignment fallback
+      return Math.max(0, Math.min(N - 1, Math.round(windowStart + (anchor.index % winSize))));
+    }
 
-    // Extension: 20 bars beyond the window end
-    const extBars = Math.min(20, N - 1 - windowEnd); // can't extend beyond data
-    const resExtPrice = res.slope * (winSize - 1 + 20) + res.intercept;
-    const supExtPrice = sup.slope * (winSize - 1 + 20) + sup.intercept;
+    const resA1idx = anchorToIdx(res.anchor1, res);
+    const resA2idx = anchorToIdx(res.anchor2, res);
+    const supA1idx = anchorToIdx(sup.anchor1, sup);
+    const supA2idx = anchorToIdx(sup.anchor2, sup);
 
-    // Build multi-point trendlines for precise alignment
-    // Sample every ~10% of the window so the line stays accurate through zoom
-    const samplePoints = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
+    // Extension: 20 bars beyond the later anchor (using slope for price)
+    const resExtIdx = Math.min(resA2idx + 20, N - 1);
+    const supExtIdx = Math.min(supA2idx + 20, N - 1);
+    const resExtPrice = res.anchor2.price + res.slope * (resExtIdx - resA2idx);
+    const supExtPrice = sup.anchor2.price + sup.slope * (supExtIdx - supA2idx);
 
-    // Resistance line (red)
+    // Resistance line (red) — passes through exact anchor prices
     this.resLine = this.chart.addLineSeries({
       color: '#ef5350', lineWidth: 2, lineStyle: 0,
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     });
-    const resData = [];
-    for (const frac of samplePoints) {
-      const localIdx = Math.round(frac * (winSize - 1));
-      const candleIdx = Math.min(windowStart + localIdx, N - 1);
-      resData.push({ time: candles[candleIdx].time, value: res.slope * localIdx + res.intercept });
-    }
-    // Extend beyond window
-    if (windowEnd + 20 < N) {
-      resData.push({ time: candles[Math.min(windowEnd + 20, N - 1)].time, value: resExtPrice });
+    const resData = [
+      { time: candles[resA1idx].time, value: res.anchor1.price },
+      { time: candles[resA2idx].time, value: res.anchor2.price },
+    ];
+    if (resExtIdx > resA2idx) {
+      resData.push({ time: candles[resExtIdx].time, value: resExtPrice });
     }
     this.resLine.setData(resData);
 
-    // Support line (green)
+    // Support line (green) — passes through exact anchor prices
     this.supLine = this.chart.addLineSeries({
       color: '#26a69a', lineWidth: 2, lineStyle: 0,
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     });
-    const supData = [];
-    for (const frac of samplePoints) {
-      const localIdx = Math.round(frac * (winSize - 1));
-      const candleIdx = Math.min(windowStart + localIdx, N - 1);
-      supData.push({ time: candles[candleIdx].time, value: sup.slope * localIdx + sup.intercept });
-    }
-    if (windowEnd + 20 < N) {
-      supData.push({ time: candles[Math.min(windowEnd + 20, N - 1)].time, value: supExtPrice });
+    const supData = [
+      { time: candles[supA1idx].time, value: sup.anchor1.price },
+      { time: candles[supA2idx].time, value: sup.anchor2.price },
+    ];
+    if (supExtIdx > supA2idx) {
+      supData.push({ time: candles[supExtIdx].time, value: supExtPrice });
     }
     this.supLine.setData(supData);
   },
