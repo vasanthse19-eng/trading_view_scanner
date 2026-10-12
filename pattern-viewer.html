@@ -489,10 +489,10 @@ const ChartPanel = {
     this.abortCtrl = new AbortController();
 
     try {
-      const candles = await this.fetchCandles(stock.symbol, pattern.timeframe, this.abortCtrl.signal);
-      if (!candles || !candles.length) throw new Error('No candle data returned');
+      const data = await this.fetchCandles(stock.symbol, pattern.timeframe, this.abortCtrl.signal);
+      if (!data || !data.candles || !data.candles.length) throw new Error('No candle data returned');
 
-      this.drawChart(candles, pattern);
+      this.drawChart(data, pattern);
       this.updateInfoCard(stock, pattern);
 
       document.getElementById('chartLoading').classList.add('hidden');
