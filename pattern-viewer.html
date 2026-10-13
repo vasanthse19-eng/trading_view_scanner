@@ -102,6 +102,38 @@
   .legend-item { display:flex; align-items:center; gap:4px; }
   .legend-dot { width:10px; height:3px; border-radius:1px; }
 
+  /* ── Trendline edit handles ── */
+  .anchor-handle {
+    position:absolute; width:14px; height:14px; border-radius:50%;
+    border:2px solid rgba(255,255,255,0.8); cursor:grab; z-index:15;
+    transform:translate(-50%,-50%); transition:box-shadow 0.15s, transform 0.15s;
+    pointer-events:none; opacity:0; display:none;
+  }
+  .anchor-handle.visible { display:block; opacity:0.85; pointer-events:auto; }
+  .anchor-handle:hover {
+    transform:translate(-50%,-50%) scale(1.4);
+    box-shadow:0 0 10px rgba(255,255,255,0.4); opacity:1;
+  }
+  .anchor-handle.dragging {
+    cursor:grabbing; transform:translate(-50%,-50%) scale(1.5); opacity:1;
+    box-shadow:0 0 14px rgba(255,255,255,0.6);
+  }
+  .anchor-handle.res { background:#ef5350; }
+  .anchor-handle.sup { background:#26a69a; }
+
+  /* ── Edit toolbar ── */
+  .edit-toolbar { display:flex; gap:6px; align-items:center; margin-left:auto; }
+  .edit-btn, .reset-btn {
+    padding:4px 10px; font-size:11px; border-radius:4px;
+    border:1px solid #2a2e3e; background:none;
+    color:#787b86; cursor:pointer; font-family:inherit;
+    transition:all 0.15s;
+  }
+  .edit-btn:hover, .reset-btn:hover { color:#d1d4dc; border-color:#363a45; }
+  .edit-btn.active { background:#2962ff; color:#fff; border-color:#2962ff; }
+  .reset-btn { display:none; }
+  .reset-btn.visible { display:inline-block; }
+
   /* hidden */
   .hidden { display:none!important; }
 </style>
@@ -173,6 +205,10 @@
         <span class="chart-price" id="chartPrice"></span>
         <span class="chart-change" id="chartChange"></span>
       </div>
+      <div class="edit-toolbar">
+        <button class="edit-btn" id="editTrendlineBtn" title="Edit trendlines (E)">✏️ Edit</button>
+        <button class="reset-btn" id="resetTrendlineBtn" title="Reset to scanner values">↩ Reset</button>
+      </div>
     </div>
     <div class="pattern-tabs" id="patternTabs"></div>
     <div class="chart-container" id="chartContainer">
@@ -180,6 +216,10 @@
         <div class="legend-item"><div class="legend-dot" style="background:#ef5350;"></div> Resistance</div>
         <div class="legend-item"><div class="legend-dot" style="background:#26a69a;"></div> Support</div>
       </div>
+      <div class="anchor-handle res" id="handleRes1"></div>
+      <div class="anchor-handle res" id="handleRes2"></div>
+      <div class="anchor-handle sup" id="handleSup1"></div>
+      <div class="anchor-handle sup" id="handleSup2"></div>
       <div class="chart-placeholder" id="chartPlaceholder">
         <div class="chart-placeholder-text">← Select a stock to view its pattern</div>
       </div>
@@ -506,6 +546,7 @@ const ChartPanel = {
     // Resize handler
     const ro = new ResizeObserver(() => {
       this.chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      if (TrendlineEditor.active) TrendlineEditor.repositionHandles();
     });
     ro.observe(container);
 
@@ -517,6 +558,7 @@ const ChartPanel = {
 
   async loadStock(stock) {
     if (!stock) return;
+    TrendlineEditor.deactivate();
     this.currentStock = stock;
 
     // Pick the single best pattern (highest confidence)
@@ -663,6 +705,9 @@ const ChartPanel = {
     const supA1idx = anchorToIdx(sup.anchor1, sup);
     const supA2idx = anchorToIdx(sup.anchor2, sup);
 
+    // Capture anchors for interactive editing
+    TrendlineEditor.captureAnchors(candles, resA1idx, resA2idx, supA1idx, supA2idx, res, sup);
+
     // Extension: 20 bars beyond the later anchor (using slope for price)
     const resExtIdx = Math.min(resA2idx + 20, N - 1);
     const supExtIdx = Math.min(supA2idx + 20, N - 1);
@@ -734,6 +779,230 @@ const ChartPanel = {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// TRENDLINE EDITOR (Interactive anchor dragging)
+// ═══════════════════════════════════════════════════════════════
+
+const TrendlineEditor = {
+  active: false,
+  dragging: null,
+  candles: null,
+
+  anchors:         { res1: null, res2: null, sup1: null, sup2: null },
+  originalAnchors: { res1: null, res2: null, sup1: null, sup2: null },
+  handles:         { res1: null, res2: null, sup1: null, sup2: null },
+
+  editBtn: null,
+  resetBtn: null,
+
+  init() {
+    this.handles.res1 = document.getElementById('handleRes1');
+    this.handles.res2 = document.getElementById('handleRes2');
+    this.handles.sup1 = document.getElementById('handleSup1');
+    this.handles.sup2 = document.getElementById('handleSup2');
+    this.editBtn  = document.getElementById('editTrendlineBtn');
+    this.resetBtn = document.getElementById('resetTrendlineBtn');
+
+    this.editBtn.addEventListener('click', () => this.toggle());
+    this.resetBtn.addEventListener('click', () => this.reset());
+
+    // Reposition handles on scroll/zoom
+    ChartPanel.chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+      if (this.active) this.repositionHandles();
+    });
+
+    this.setupDragHandlers();
+  },
+
+  toggle() {
+    if (!ChartPanel.resLine || !ChartPanel.supLine) return;
+    this.active = !this.active;
+    this.editBtn.classList.toggle('active', this.active);
+
+    if (this.active) {
+      ChartPanel.chart.applyOptions({ handleScroll: false, handleScale: false });
+      Object.values(this.handles).forEach(h => h.classList.add('visible'));
+      this.resetBtn.classList.add('visible');
+      this.repositionHandles();
+    } else {
+      ChartPanel.chart.applyOptions({ handleScroll: true, handleScale: true });
+      Object.values(this.handles).forEach(h => h.classList.remove('visible'));
+      this.resetBtn.classList.remove('visible');
+      this.dragging = null;
+    }
+  },
+
+  captureAnchors(candles, resA1idx, resA2idx, supA1idx, supA2idx, res, sup) {
+    this.candles = candles;
+    const mk = (idx, price) => ({ candleIndex: idx, time: candles[idx].time, price: price });
+
+    this.anchors.res1 = mk(resA1idx, res.anchor1.price);
+    this.anchors.res2 = mk(resA2idx, res.anchor2.price);
+    this.anchors.sup1 = mk(supA1idx, sup.anchor1.price);
+    this.anchors.sup2 = mk(supA2idx, sup.anchor2.price);
+
+    this.originalAnchors = JSON.parse(JSON.stringify(this.anchors));
+
+    if (this.active) this.repositionHandles();
+  },
+
+  repositionHandles() {
+    const ts = ChartPanel.chart.timeScale();
+    const ps = ChartPanel.candleSeries;
+
+    for (const key of ['res1', 'res2', 'sup1', 'sup2']) {
+      const anchor = this.anchors[key];
+      const handle = this.handles[key];
+      if (!anchor) { handle.style.display = 'none'; continue; }
+
+      const x = ts.timeToCoordinate(anchor.time);
+      const y = ps.priceToCoordinate(anchor.price);
+
+      if (x === null || y === null || x < 0 || y < 0) {
+        handle.style.opacity = '0';
+        handle.style.pointerEvents = 'none';
+      } else {
+        handle.style.left = x + 'px';
+        handle.style.top  = y + 'px';
+        handle.style.opacity = '';
+        handle.style.pointerEvents = '';
+      }
+    }
+  },
+
+  setupDragHandlers() {
+    const container = document.getElementById('chartContainer');
+
+    for (const key of ['res1', 'res2', 'sup1', 'sup2']) {
+      this.handles[key].addEventListener('mousedown', (e) => {
+        if (!this.active) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.dragging = key;
+        this.handles[key].classList.add('dragging');
+      });
+    }
+
+    document.addEventListener('mousemove', (e) => {
+      if (!this.dragging) return;
+      e.preventDefault();
+      this.onDrag(e);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!this.dragging) return;
+      this.handles[this.dragging].classList.remove('dragging');
+      this.dragging = null;
+    });
+  },
+
+  onDrag(e) {
+    const container = document.getElementById('chartContainer');
+    const rect = container.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+
+    const ts = ChartPanel.chart.timeScale();
+    const ps = ChartPanel.candleSeries;
+
+    const time  = ts.coordinateToTime(localX);
+    const price = ps.coordinateToPrice(localY);
+    if (time == null || price == null) return;
+
+    const candles = this.candles;
+    let nearestIdx = this.findNearestCandleByTime(candles, time);
+    if (nearestIdx < 0) return;
+
+    // Enforce anchor ordering: anchor1 must be before anchor2
+    const key = this.dragging;
+    const isA1 = key.endsWith('1');
+    const pairedKey = isA1 ? key.replace('1', '2') : key.replace('2', '1');
+    const paired = this.anchors[pairedKey];
+    if (paired) {
+      if (isA1 && nearestIdx >= paired.candleIndex) {
+        nearestIdx = paired.candleIndex - 1;
+      } else if (!isA1 && nearestIdx <= this.anchors[key.replace('2', '1')].candleIndex) {
+        nearestIdx = this.anchors[key.replace('2', '1')].candleIndex + 1;
+      }
+    }
+    nearestIdx = Math.max(0, Math.min(candles.length - 1, nearestIdx));
+
+    const snappedPrice = this.snapPrice(candles[nearestIdx], price);
+
+    this.anchors[key] = {
+      candleIndex: nearestIdx,
+      time: candles[nearestIdx].time,
+      price: snappedPrice,
+    };
+
+    this.redrawTrendline(key.startsWith('res') ? 'res' : 'sup');
+    this.repositionHandles();
+  },
+
+  findNearestCandleByTime(candles, time) {
+    let lo = 0, hi = candles.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (candles[mid].time < time) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(candles[lo - 1].time - time) < Math.abs(candles[lo].time - time)) {
+      return lo - 1;
+    }
+    return lo;
+  },
+
+  snapPrice(candle, rawPrice) {
+    const range = candle.high - candle.low;
+    const threshold = range * 0.3;
+    if (Math.abs(rawPrice - candle.high) < threshold) return candle.high;
+    if (Math.abs(rawPrice - candle.low)  < threshold) return candle.low;
+    return rawPrice;
+  },
+
+  redrawTrendline(lineType) {
+    const a1 = this.anchors[lineType + '1'];
+    const a2 = this.anchors[lineType + '2'];
+    const candles = this.candles;
+    const N = candles.length;
+    const series = lineType === 'res' ? ChartPanel.resLine : ChartPanel.supLine;
+    if (!series || !a1 || !a2) return;
+
+    const data = [
+      { time: a1.time, value: a1.price },
+      { time: a2.time, value: a2.price },
+    ];
+
+    // Extension: +20 bars beyond anchor2
+    const barSpan = a2.candleIndex - a1.candleIndex;
+    if (barSpan > 0) {
+      const slope = (a2.price - a1.price) / barSpan;
+      const extIdx = Math.min(a2.candleIndex + 20, N - 1);
+      if (extIdx > a2.candleIndex) {
+        data.push({ time: candles[extIdx].time, value: a2.price + slope * (extIdx - a2.candleIndex) });
+      }
+    }
+
+    series.setData(data);
+  },
+
+  reset() {
+    if (!this.originalAnchors.res1) return;
+    this.anchors = JSON.parse(JSON.stringify(this.originalAnchors));
+    this.redrawTrendline('res');
+    this.redrawTrendline('sup');
+    this.repositionHandles();
+  },
+
+  deactivate() {
+    if (this.active) this.toggle();
+    this.anchors         = { res1: null, res2: null, sup1: null, sup2: null };
+    this.originalAnchors = { res1: null, res2: null, sup1: null, sup2: null };
+    this.candles = null;
+    this.dragging = null;
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════
 // APP (Orchestration)
 // ═══════════════════════════════════════════════════════════════
 
@@ -745,6 +1014,7 @@ const App = {
     // Init components
     StockList.init();
     ChartPanel.init();
+    TrendlineEditor.init();
 
     // Render stock list
     StockList.render();
@@ -776,6 +1046,9 @@ const App = {
       } else if (e.key === 'ArrowUp' || e.key === 'k') {
         e.preventDefault();
         this.selectPrev();
+      } else if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        TrendlineEditor.toggle();
       }
     });
   },
